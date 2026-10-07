@@ -80,7 +80,7 @@ func TestWriteProblem(t *testing.T) {
 	}
 	a.Users = user
 	a.Privileges = append(a.Privileges, a.Privileges...)
-	add := func(db *string, any bool, actions ...string) {
+	add := func(db *string, anyResource bool, actions ...string) {
 		var p = struct {
 			Resource struct {
 				DB          *string `bson:"db"`
@@ -90,7 +90,7 @@ func TestWriteProblem(t *testing.T) {
 			} `bson:"resource"`
 			Actions []string `bson:"actions"`
 		}{Actions: actions}
-		p.Resource.DB, p.Resource.AnyResource = db, any
+		p.Resource.DB, p.Resource.AnyResource = db, anyResource
 		a.Privileges = append(a.Privileges, p)
 	}
 	add(str("shop"), false, "find", "listCollections")
@@ -195,12 +195,15 @@ func mongoCheck(t *testing.T, pipeline string) config.Check {
 
 func TestMongoDBReadsDocuments(t *testing.T) {
 	db, _, reader := mongoDB(t)
-	src, warnings, err := openMongo(t, db, reader, true)
+	src, warnings, err := openMongo(t, db, reader+"&readPreference=secondaryPreferred", true)
 	if err != nil {
 		t.Fatal(err)
 	}
 	if len(warnings) != 0 {
 		t.Errorf("warnings for a read-only user: %v", warnings)
+	}
+	if rp := src.(*mongodb).readPref; rp == nil || rp.Mode().String() != "secondaryPreferred" {
+		t.Errorf("read preference from the URI = %v", rp)
 	}
 	rows, err := collect(t, src, mongoCheck(t, `
 - $sort: {_id: 1}
@@ -257,8 +260,9 @@ func TestMongoDBRefusesAWritingUser(t *testing.T) {
 	}
 }
 
-// The check's timeout goes to the server as maxTimeMS, so the server gives up too.
-func TestMongoDBSendsMaxTimeMS(t *testing.T) {
+// The check's timeout goes to the server as maxTimeMS, so the server gives up too,
+// and the URI's read preference is kept, so checks can read from a secondary.
+func TestMongoDBSendsMaxTimeMSAndReadPreference(t *testing.T) {
 	db, _, reader := mongoDB(t)
 	var sent bson.Raw
 	monitor := &event.CommandMonitor{Started: func(_ context.Context, e *event.CommandStartedEvent) {
@@ -266,18 +270,24 @@ func TestMongoDBSendsMaxTimeMS(t *testing.T) {
 			sent = e.Command
 		}
 	}}
-	client, err := mongo.Connect(options.Client().ApplyURI(reader).SetMonitor(monitor))
+	opts := clientOptions(reader + "&readPreference=secondaryPreferred").SetMonitor(monitor)
+	client, err := mongo.Connect(opts)
 	if err != nil {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { _ = client.Disconnect(context.Background()) })
-	src := &mongodb{client: client, db: client.Database(db)}
+	src := &mongodb{client: client, db: client.Database(db), readPref: opts.ReadPreference}
 	if _, err := collect(t, src, mongoCheck(t, `[{$match: {}}]`)); err != nil {
 		t.Fatal(err)
 	}
 	ms, ok := sent.Lookup("maxTimeMS").AsInt64OK()
-	if !ok || ms != 5000 {
+	if !ok || ms <= 0 || ms > 5000 {
 		t.Errorf("maxTimeMS = %d, %v in %s", ms, ok, sent)
+	}
+	// A single server gets no $readPreference in the command, so the test checks
+	// what the source passes to the driver.
+	if src.readPref == nil || src.readPref.Mode().String() != "secondaryPreferred" {
+		t.Errorf("read preference = %v", src.readPref)
 	}
 	if c, _ := sent.Lookup("comment").StringValueOK(); c != "money-checks: c" {
 		t.Errorf("comment = %q", c)

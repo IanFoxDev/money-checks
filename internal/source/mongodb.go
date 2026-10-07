@@ -13,14 +13,16 @@ import (
 	"go.mongodb.org/mongo-driver/v2/bson"
 	"go.mongodb.org/mongo-driver/v2/mongo"
 	"go.mongodb.org/mongo-driver/v2/mongo/options"
+	"go.mongodb.org/mongo-driver/v2/mongo/readpref"
 	"go.yaml.in/yaml/v3"
 
 	"github.com/ianfoxdev/money-checks/internal/config"
 )
 
 type mongodb struct {
-	client *mongo.Client
-	db     *mongo.Database
+	client   *mongo.Client
+	db       *mongo.Database
+	readPref *readpref.ReadPref // from the URI; nil is primary
 }
 
 func openMongoDB(ctx context.Context, m config.MongoDB, warn func(string)) (*mongodb, error) {
@@ -28,11 +30,12 @@ func openMongoDB(ctx context.Context, m config.MongoDB, warn func(string)) (*mon
 	if err != nil {
 		return nil, err
 	}
-	client, err := mongo.Connect(options.Client().ApplyURI(uri))
+	opts := clientOptions(uri)
+	client, err := mongo.Connect(opts)
 	if err != nil {
 		return nil, fmt.Errorf("mongodb: %w", err)
 	}
-	src := &mongodb{client: client, db: client.Database(m.Database)}
+	src := &mongodb{client: client, db: client.Database(m.Database), readPref: opts.ReadPreference}
 	fail := func(err error) (*mongodb, error) {
 		_ = client.Disconnect(context.WithoutCancel(ctx))
 		return nil, fmt.Errorf("mongodb: %w", err)
@@ -51,6 +54,11 @@ func openMongoDB(ctx context.Context, m config.MongoDB, warn func(string)) (*mon
 		warn("mongodb: " + problem + "; running anyway because require_read_only is false")
 	}
 	return src, nil
+}
+
+// clientOptions reads the URI, including its read preference.
+func clientOptions(uri string) *options.ClientOptions {
+	return options.Client().ApplyURI(uri)
 }
 
 // connectionAuth is the part of connectionStatus that says who is connected and
@@ -107,10 +115,9 @@ func (a connectionAuth) writeProblem(database string) string {
 	return fmt.Sprintf("the user can write to %s (%s)", database, strings.Join(acts, ", "))
 }
 
-// Query runs the pipeline with the check's timeout, both as the context deadline
-// and as maxTimeMS, so the server stops the work too. Driver v2 derives maxTimeMS
-// from the deadline only when the client has a timeout, so it is sent explicitly.
-// The read preference is the URI's.
+// Query runs the pipeline with the check's timeout as the context deadline, which
+// the driver also sends as maxTimeMS, so the server stops the work when the check
+// times out. The read preference is the URI's.
 func (m *mongodb) Query(ctx context.Context, ch config.Check, each func(Row) error) error {
 	pipeline, err := Pipeline(&ch.Pipeline)
 	if err != nil {
@@ -118,10 +125,19 @@ func (m *mongodb) Query(ctx context.Context, ch config.Check, each func(Row) err
 	}
 	ctx, cancel := context.WithTimeout(ctx, ch.Timeout)
 	defer cancel()
-	opts := options.Aggregate().
-		SetComment("money-checks: " + ch.Name).
-		SetCustom(bson.M{"maxTimeMS": ch.Timeout.Milliseconds()})
-	cur, err := m.db.Collection(ch.Collection).Aggregate(ctx, pipeline, opts)
+	// Collection.Aggregate never sends maxTimeMS (DRIVERS-2722), so the command is
+	// sent as is: the driver adds maxTimeMS from the deadline to commands.
+	cmd := bson.D{
+		{Key: "aggregate", Value: ch.Collection},
+		{Key: "pipeline", Value: pipeline},
+		{Key: "cursor", Value: bson.D{}},
+		{Key: "comment", Value: "money-checks: " + ch.Name},
+	}
+	opts := options.RunCmd()
+	if m.readPref != nil {
+		opts.SetReadPreference(m.readPref)
+	}
+	cur, err := m.db.RunCommandCursor(ctx, cmd, opts)
 	if err != nil {
 		return err
 	}
