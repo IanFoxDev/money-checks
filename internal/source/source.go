@@ -48,9 +48,17 @@ type Source interface {
 	Close(ctx context.Context) error
 }
 
-// Open connects to a source and checks that it can only read.
-func Open(ctx context.Context, name string, s config.Source) (Source, error) {
+// Open connects to a source and checks that it can only read. warn gets messages
+// that do not stop the run, such as a MongoDB user that can write when
+// require_read_only is false.
+func Open(ctx context.Context, name string, s config.Source, warn func(string)) (Source, error) {
 	switch {
+	case s.MongoDB != nil:
+		src, err := openMongoDB(ctx, *s.MongoDB, func(msg string) { warn("source " + name + ": " + msg) })
+		if err != nil {
+			return nil, fmt.Errorf("source %s: %w", name, err)
+		}
+		return src, nil
 	case s.Postgres != nil:
 		src, err := openPostgres(ctx, *s.Postgres)
 		if err != nil {
@@ -58,7 +66,7 @@ func Open(ctx context.Context, name string, s config.Source) (Source, error) {
 		}
 		return src, nil
 	default:
-		return nil, fmt.Errorf("source %s: %s is not supported yet", name, s.Kind())
+		return nil, fmt.Errorf("source %s: set mongodb or postgres", name)
 	}
 }
 

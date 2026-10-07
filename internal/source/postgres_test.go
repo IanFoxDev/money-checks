@@ -56,13 +56,15 @@ func pgSchema(t *testing.T) string {
 
 func openPG(t *testing.T) Source {
 	t.Helper()
-	src, err := Open(context.Background(), "ledger", config.Source{Postgres: &config.Postgres{DSNEnv: "MC_PG"}})
+	src, err := Open(context.Background(), "ledger", config.Source{Postgres: &config.Postgres{DSNEnv: "MC_PG"}}, noWarn)
 	if err != nil {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { _ = src.Close(context.Background()) })
 	return src
 }
+
+func noWarn(string) {}
 
 func pgCheck(query string) config.Check {
 	return config.Check{Name: "c", Query: query, Timeout: 5 * time.Second}
@@ -170,7 +172,7 @@ func TestPostgresStopsOnCallbackError(t *testing.T) {
 
 func TestOpenNamesMissingVariable(t *testing.T) {
 	t.Setenv("MC_PG_EMPTY", "")
-	_, err := Open(context.Background(), "ledger", config.Source{Postgres: &config.Postgres{DSNEnv: "MC_PG_EMPTY"}})
+	_, err := Open(context.Background(), "ledger", config.Source{Postgres: &config.Postgres{DSNEnv: "MC_PG_EMPTY"}}, noWarn)
 	if err == nil || !strings.Contains(err.Error(), "source ledger") || !strings.Contains(err.Error(), "MC_PG_EMPTY") {
 		t.Errorf("got %v", err)
 	}
