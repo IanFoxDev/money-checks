@@ -1,0 +1,44 @@
+name: go
+
+on:
+  push:
+    branches: [master]
+  pull_request:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:17-alpine
+        env:
+          POSTGRES_USER: checks
+          POSTGRES_PASSWORD: checks
+          POSTGRES_DB: checks
+        ports: ["5432:5432"]
+        options: >-
+          --health-cmd "pg_isready -U checks"
+          --health-interval 2s
+          --health-timeout 5s
+          --health-retries 15
+      mongo:
+        image: mongo:8
+        ports: ["27017:27017"]
+        options: >-
+          --health-cmd "mongosh --quiet --eval 'db.runCommand({ping: 1})'"
+          --health-interval 2s
+          --health-timeout 5s
+          --health-retries 15
+    env:
+      MONEY_CHECKS_TEST_PG_DSN: postgres://checks:checks@127.0.0.1:5432/checks
+      MONEY_CHECKS_TEST_MONGO_URI: mongodb://127.0.0.1:27017
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-go@v7
+        with:
+          go-version-file: go.mod
+      - run: go vet ./...
+      - run: go test -race ./...
+      - uses: golangci/golangci-lint-action@v9
+        with:
+          version: v2.14.0
