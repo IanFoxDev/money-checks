@@ -1,0 +1,97 @@
+{
+  "version": 1,
+  "started_at": "2026-10-08T06:00:00Z",
+  "summary": {
+    "checks": 4,
+    "violations": 2,
+    "failed": 1,
+    "passed": 1
+  },
+  "warnings": [
+    "source billing: mongodb: the user can write to shop (insert); running anyway because require_read_only is false"
+  ],
+  "checks": [
+    {
+      "name": "two_rebills_in_one_period",
+      "description": "A subscription was charged twice for the same period.",
+      "source": "billing",
+      "severity": "error",
+      "status": "violations",
+      "violations": 3,
+      "totals": [
+        {
+          "currency": "EUR",
+          "minor": 500,
+          "amount": "5.00"
+        },
+        {
+          "currency": "USD",
+          "minor": 3709,
+          "amount": "37.09"
+        }
+      ],
+      "samples": [
+        {
+          "id": "{\"subscription\":\"s1\",\"period\":\"2026-09\"}",
+          "amount": {
+            "currency": "USD",
+            "minor": 2699,
+            "amount": "26.99"
+          },
+          "fields": {
+            "email": "a***@example.com",
+            "note": "a|b\nc"
+          }
+        },
+        {
+          "id": "{\"subscription\":\"s2\",\"period\":\"2026-09\"}",
+          "amount": {
+            "currency": "USD",
+            "minor": 1010,
+            "amount": "10.10"
+          },
+          "fields": {
+            "email": "b***@example.com",
+            "note": ""
+          }
+        }
+      ],
+      "duration_ms": 120
+    },
+    {
+      "name": "balance_matches_journal",
+      "source": "billing",
+      "severity": "error",
+      "status": "ok",
+      "violations": 0,
+      "totals": [],
+      "samples": [],
+      "duration_ms": 40
+    },
+    {
+      "name": "paid_without_access",
+      "source": "billing",
+      "severity": "warn",
+      "status": "violations",
+      "violations": 1,
+      "totals": [],
+      "samples": [
+        {
+          "id": "p9"
+        }
+      ],
+      "duration_ms": 0
+    },
+    {
+      "name": "refund_twice",
+      "source": "ledger",
+      "severity": "error",
+      "status": "failed",
+      "violations": 0,
+      "totals": [],
+      "samples": [],
+      "error": "source ledger: environment variable LEDGER_DSN is empty",
+      "duration_ms": 0
+    }
+  ]
+}
