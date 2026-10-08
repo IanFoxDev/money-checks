@@ -86,7 +86,7 @@ checks:
 func TestRunPostgres(t *testing.T) {
 	dsn := os.Getenv("MONEY_CHECKS_TEST_PG_DSN")
 	if dsn == "" {
-		t.Skip("MONEY_CHECKS_TEST_PG_DSN is not set; make postgres-up starts a database for it")
+		skipWithoutDB(t, "MONEY_CHECKS_TEST_PG_DSN is not set; make postgres-up starts a database for it")
 	}
 	ctx := context.Background()
 	conn, err := pgx.Connect(ctx, dsn)
@@ -156,4 +156,15 @@ serve: {slack: {webhook_env: MC_CLI_SLACK}}
 	if code, _, errOut := runCLI(t, "serve", "-c", path); code != exitError || !strings.Contains(errOut, "serve.slack: environment variable MC_CLI_SLACK is empty") {
 		t.Errorf("missing webhook: exit %d, %q", code, errOut)
 	}
+}
+
+// skipWithoutDB skips a test that needs a database, or fails it when
+// MONEY_CHECKS_REQUIRE_DB is set, as in CI: a green run must mean the database
+// tests ran.
+func skipWithoutDB(t *testing.T, msg string) {
+	t.Helper()
+	if os.Getenv("MONEY_CHECKS_REQUIRE_DB") != "" {
+		t.Fatal(msg)
+	}
+	t.Skip(msg)
 }

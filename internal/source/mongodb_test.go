@@ -123,7 +123,7 @@ func mongoDB(t *testing.T) (db, adminURI, readerURI string) {
 	t.Helper()
 	adminURI = os.Getenv(mongoEnv)
 	if adminURI == "" {
-		t.Skip(mongoEnv + " is not set; make mongo-up starts a server for it")
+		skipWithoutDB(t, mongoEnv+" is not set; make mongo-up starts a server for it")
 	}
 	ctx := context.Background()
 	client, err := mongo.Connect(options.Client().ApplyURI(adminURI))

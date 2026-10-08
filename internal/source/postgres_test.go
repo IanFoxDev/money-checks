@@ -24,7 +24,7 @@ func pgSchema(t *testing.T) string {
 	t.Helper()
 	dsn := os.Getenv(pgEnv)
 	if dsn == "" {
-		t.Skip(pgEnv + " is not set; make postgres-up starts a database for it")
+		skipWithoutDB(t, pgEnv+" is not set; make postgres-up starts a database for it")
 	}
 	ctx := context.Background()
 	conn, err := pgx.Connect(ctx, dsn)
@@ -176,4 +176,15 @@ func TestOpenNamesMissingVariable(t *testing.T) {
 	if err == nil || !strings.Contains(err.Error(), "source ledger") || !strings.Contains(err.Error(), "MC_PG_EMPTY") {
 		t.Errorf("got %v", err)
 	}
+}
+
+// skipWithoutDB skips a test that needs a database, or fails it when
+// MONEY_CHECKS_REQUIRE_DB is set, as in CI: a green run must mean the database
+// tests ran.
+func skipWithoutDB(t *testing.T, msg string) {
+	t.Helper()
+	if os.Getenv("MONEY_CHECKS_REQUIRE_DB") != "" {
+		t.Fatal(msg)
+	}
+	t.Skip(msg)
 }

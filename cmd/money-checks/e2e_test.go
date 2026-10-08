@@ -25,7 +25,7 @@ const example = "../../examples/subscriptions"
 func TestEndToEndExample(t *testing.T) {
 	pgDSN, mongoURI := os.Getenv("MONEY_CHECKS_TEST_PG_DSN"), os.Getenv("MONEY_CHECKS_TEST_MONGO_URI")
 	if pgDSN == "" || mongoURI == "" {
-		t.Skip("MONEY_CHECKS_TEST_PG_DSN and MONEY_CHECKS_TEST_MONGO_URI are needed; make postgres-up mongo-up")
+		skipWithoutDB(t, "MONEY_CHECKS_TEST_PG_DSN and MONEY_CHECKS_TEST_MONGO_URI are needed; make postgres-up mongo-up")
 	}
 	name := fmt.Sprintf("mc_e2e_%d", time.Now().UnixNano())
 	t.Setenv("SHOP_MONGO_URI", seedMongo(t, mongoURI, name))
