@@ -7,13 +7,16 @@ import (
 	"flag"
 	"fmt"
 	"io"
+	"log/slog"
 	"os"
 	"os/signal"
+	"syscall"
 	"time"
 
 	"github.com/ianfoxdev/money-checks/internal/check"
 	"github.com/ianfoxdev/money-checks/internal/config"
 	"github.com/ianfoxdev/money-checks/internal/report"
+	"github.com/ianfoxdev/money-checks/internal/serve"
 	"github.com/ianfoxdev/money-checks/internal/source"
 )
 
@@ -29,12 +32,14 @@ const (
 const usage = `usage:
   money-checks run -c checks.yaml [--markdown file] [--json file]
       run every check once; the Markdown report goes to stdout unless a file is given
+  money-checks serve -c checks.yaml
+      run the checks now and every serve.interval; /metrics, /healthz, /readyz on serve.listen
   money-checks version
 
 exit codes: 0 no violations of severity error, 1 violations found, 2 a check failed`
 
 func main() {
-	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt)
+	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	code := run(ctx, os.Args[1:], os.Stdout, os.Stderr, source.Open, time.Now)
 	stop()
 	os.Exit(code)
@@ -51,6 +56,8 @@ func run(ctx context.Context, args []string, stdout, stderr io.Writer, open chec
 		return exitOK
 	case "run":
 		return runChecks(ctx, args[1:], stdout, stderr, open, now)
+	case "serve":
+		return serveChecks(ctx, args[1:], stderr, open, now)
 	default:
 		fmt.Fprintln(stderr, usage)
 		return exitError
@@ -96,6 +103,35 @@ func runChecks(ctx context.Context, args []string, stdout, stderr io.Writer, ope
 		}
 	}
 	return r.ExitCode()
+}
+
+func serveChecks(ctx context.Context, args []string, stderr io.Writer, open check.Opener, now func() time.Time) int {
+	fs := flag.NewFlagSet("serve", flag.ContinueOnError)
+	fs.SetOutput(stderr)
+	path := fs.String("c", "checks.yaml", "configuration file")
+	if err := fs.Parse(args); err != nil {
+		return exitError
+	}
+	cfg, err := config.Load(*path)
+	if err != nil {
+		fmt.Fprintln(stderr, err)
+		return exitError
+	}
+	log := slog.New(slog.NewJSONHandler(stderr, nil))
+	var notify serve.Notifier
+	if cfg.Serve.Slack != nil {
+		url, err := config.Getenv(cfg.Serve.Slack.WebhookEnv)
+		if err != nil {
+			fmt.Fprintln(stderr, "serve.slack:", err)
+			return exitError
+		}
+		notify = serve.NewSlack(url)
+	}
+	if err := serve.New(cfg, open, notify, log, now).Run(ctx); err != nil {
+		log.Error("serve stopped", "error", err)
+		return exitError
+	}
+	return exitOK
 }
 
 func writeFile(path string, r check.Report, write func(io.Writer, check.Report) error) error {

@@ -140,3 +140,20 @@ checks:
 		t.Errorf("warn: exit %d", code)
 	}
 }
+
+func TestServeConfigErrors(t *testing.T) {
+	if code, _, errOut := runCLI(t, "serve", "-c", writeConfig(t, "version: 1\nsurces: {}\n")); code != exitError || !strings.Contains(errOut, "surces") {
+		t.Errorf("bad config: exit %d, %q", code, errOut)
+	}
+	t.Setenv("MC_CLI_SLACK", "")
+	path := writeConfig(t, `
+version: 1
+sources: {ledger: {postgres: {dsn_env: MC_CLI_EMPTY}}}
+checks:
+  - {name: refund_twice, source: ledger, query: select 1, id: id}
+serve: {slack: {webhook_env: MC_CLI_SLACK}}
+`)
+	if code, _, errOut := runCLI(t, "serve", "-c", path); code != exitError || !strings.Contains(errOut, "serve.slack: environment variable MC_CLI_SLACK is empty") {
+		t.Errorf("missing webhook: exit %d, %q", code, errOut)
+	}
+}
