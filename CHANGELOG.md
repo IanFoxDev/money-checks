@@ -8,6 +8,14 @@ configuration, the report format or the metric names; such changes are marked
 
 ## [Unreleased]
 
+## [0.1.0] - 2026-10-08
+
+The first release: checks as MongoDB pipelines and PostgreSQL queries that must
+return no rows, run once with a Markdown and JSON report or on a schedule with
+Prometheus metrics and Slack messages. Read-only is enforced by the database, and
+amounts never pass through a float. Checked end to end against the example shop in
+CI, with the database tests required to run.
+
 ### Added
 
 - `money-checks run -c checks.yaml`: runs every check once and writes a Markdown
@@ -24,4 +32,5 @@ configuration, the report format or the metric names; such changes are marked
 - `show` and `mask` for the columns a report may contain.
 - Docker image and the example in `examples/subscriptions`.
 
-[Unreleased]: https://github.com/IanFoxDev/money-checks/commits/master
+[Unreleased]: https://github.com/IanFoxDev/money-checks/compare/v0.1.0...HEAD
+[0.1.0]: https://github.com/IanFoxDev/money-checks/releases/tag/v0.1.0
