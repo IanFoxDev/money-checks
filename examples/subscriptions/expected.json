@@ -1,0 +1,10 @@
+{
+  "negative_wallet_balance": {"status": "violations", "violations": 1, "totals": {"USD": "-3.00"}},
+  "payment_without_subscription": {"status": "ok", "violations": 0, "totals": {}},
+  "provider_txn_recorded_twice": {"status": "violations", "violations": 1, "totals": {"JPY": "1200"}},
+  "refund_exceeds_payment": {"status": "violations", "violations": 1, "totals": {"USD": "11.00"}},
+  "two_active_subscriptions": {"status": "violations", "violations": 2, "totals": {"JPY": "1200", "USD": "9.99"}},
+  "two_renewals_in_one_period": {"status": "violations", "violations": 1, "totals": {"USD": "9.99"}},
+  "unbalanced_transactions": {"status": "violations", "violations": 3, "totals": {"EUR": "-10.00", "USD": "9.50"}},
+  "wallet_balance_matches_entries": {"status": "violations", "violations": 1, "totals": {"EUR": "-1.00"}}
+}

@@ -1,0 +1,5 @@
+[
+  {"_id": "u_anna", "balance_minor": {"$numberLong": "1500"}, "currency": "USD"},
+  {"_id": "u_ben", "balance_minor": {"$numberLong": "700"}, "currency": "EUR"},
+  {"_id": "u_carl", "balance_minor": {"$numberLong": "0"}, "currency": "USD"}
+]

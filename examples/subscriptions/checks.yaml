@@ -1,0 +1,147 @@
+# Money invariants of a small subscription shop. Payments, subscriptions and
+# wallets live in MongoDB; the double-entry ledger lives in PostgreSQL.
+# Every check returns the rows that break the invariant; a clean shop returns none.
+version: 1
+defaults:
+  timeout: 30s
+sources:
+  shop:
+    mongodb:
+      uri_env: SHOP_MONGO_URI
+      database: shop
+  ledger:
+    postgres:
+      dsn_env: LEDGER_PG_DSN
+
+checks:
+  - name: two_renewals_in_one_period
+    description: A subscription was charged more than once for the same period.
+    source: shop
+    collection: payments
+    pipeline:
+      - $match: {kind: renewal, status: succeeded}
+      - $group:
+          _id: {subscription: "$subscription_id", period: "$period"}
+          n: {$sum: 1}
+          payments: {$push: "$_id"}
+          # Amounts are doubles: round the sum, or 0.1 + 0.2 fails the check.
+          total: {$sum: "$amount"}
+          largest: {$max: "$amount"}
+          currency: {$first: "$currency"}
+      - $match: {n: {$gt: 1}}
+      - $set: {extra: {$round: [{$subtract: ["$total", "$largest"]}, 2]}}
+      - $sort: {_id: 1}
+    amount: {field: extra, unit: major, currency_field: currency}
+    show: [n, payments]
+
+  - name: two_active_subscriptions
+    description: A user has more than one active subscription; every extra one renews.
+    source: shop
+    collection: subscriptions
+    pipeline:
+      - $match: {status: active}
+      - $group:
+          _id: "$user_id"
+          n: {$sum: 1}
+          providers: {$addToSet: "$provider"}
+          email: {$first: "$email"}
+          total: {$sum: "$price"}
+          largest: {$max: "$price"}
+          currency: {$first: "$currency"}
+      - $match: {n: {$gt: 1}}
+      - $set: {extra: {$round: [{$subtract: ["$total", "$largest"]}, 2]}}
+      - $sort: {_id: 1}
+    amount: {field: extra, unit: major, currency_field: currency}
+    show: [n, providers, email]
+    mask: [email]
+
+  - name: provider_txn_recorded_twice
+    description: Two successful payments carry the same provider transaction id.
+    source: shop
+    severity: warn
+    collection: payments
+    pipeline:
+      - $match: {status: succeeded, kind: {$ne: refund}}
+      - $group:
+          _id: {provider: "$provider", txn: "$provider_txn"}
+          n: {$sum: 1}
+          payments: {$push: "$_id"}
+          total: {$sum: "$amount"}
+          largest: {$max: "$amount"}
+          currency: {$first: "$currency"}
+      - $match: {n: {$gt: 1}}
+      - $set: {extra: {$round: [{$subtract: ["$total", "$largest"]}, 2]}}
+      - $sort: {_id: 1}
+    amount: {field: extra, unit: major, currency_field: currency}
+    show: [n, payments]
+
+  - name: refund_exceeds_payment
+    description: Refunds of a payment add up to more than the payment.
+    source: shop
+    collection: payments
+    pipeline:
+      - $match: {kind: refund, status: succeeded}
+      - $group: {_id: "$refund_of", refunded: {$sum: "$amount"}, refunds: {$sum: 1}}
+      - $lookup: {from: payments, localField: _id, foreignField: _id, as: original}
+      - $unwind: "$original"
+      - $set:
+          paid: "$original.amount"
+          currency: "$original.currency"
+          excess: {$round: [{$subtract: ["$refunded", "$original.amount"]}, 2]}
+      - $match: {excess: {$gt: 0}}
+      - $project: {original: 0}
+      - $sort: {_id: 1}
+    amount: {field: excess, unit: major, currency_field: currency}
+    show: [paid, refunded, refunds]
+
+  - name: wallet_balance_matches_entries
+    description: A wallet's stored balance differs from the sum of its entries.
+    source: shop
+    collection: wallets
+    pipeline:
+      - $lookup: {from: wallet_entries, localField: _id, foreignField: user_id, as: entries}
+      - $set: {entries_minor: {$sum: "$entries.amount_minor"}}
+      - $set: {diff_minor: {$subtract: ["$balance_minor", "$entries_minor"]}}
+      - $match: {diff_minor: {$ne: 0}}
+      - $project: {entries: 0}
+      - $sort: {_id: 1}
+    amount: {field: diff_minor, unit: minor, currency_field: currency}
+    show: [balance_minor, entries_minor]
+
+  - name: payment_without_subscription
+    description: A successful payment points to a subscription that does not exist.
+    source: shop
+    collection: payments
+    pipeline:
+      - $match: {status: succeeded}
+      - $lookup: {from: subscriptions, localField: subscription_id, foreignField: _id, as: s}
+      - $match: {s: {$size: 0}}
+      - $project: {s: 0}
+    amount: {field: amount, unit: major, currency_field: currency}
+    show: [subscription_id]
+
+  - name: unbalanced_transactions
+    description: A ledger transaction's entries do not sum to zero in a currency.
+    source: ledger
+    query: |
+      select transaction_id || ':' || currency as id, currency, sum(amount_minor) as imbalance
+      from ledger_entries
+      group by transaction_id, currency
+      having sum(amount_minor) <> 0
+      order by 1
+    id: id
+    amount: {field: imbalance, unit: minor, currency_field: currency}
+
+  - name: negative_wallet_balance
+    description: A customer wallet in the ledger is below zero.
+    source: ledger
+    severity: warn
+    query: |
+      select account || ':' || currency as id, currency, sum(amount_minor) as balance
+      from ledger_entries
+      where account like 'wallet:%'
+      group by account, currency
+      having sum(amount_minor) < 0
+      order by 1
+    id: id
+    amount: {field: balance, unit: minor, currency_field: currency}

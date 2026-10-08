@@ -1,0 +1,8 @@
+[
+  {"user_id": "u_anna", "amount_minor": {"$numberLong": "2000"}, "reason": "top_up"},
+  {"user_id": "u_anna", "amount_minor": {"$numberLong": "-500"}, "reason": "purchase"},
+  {"user_id": "u_ben", "amount_minor": {"$numberLong": "1000"}, "reason": "top_up"},
+  {"user_id": "u_ben", "amount_minor": {"$numberLong": "-200"}, "reason": "purchase"},
+  {"user_id": "u_carl", "amount_minor": {"$numberLong": "300"}, "reason": "top_up"},
+  {"user_id": "u_carl", "amount_minor": {"$numberLong": "-300"}, "reason": "purchase"}
+]

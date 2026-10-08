@@ -1,0 +1,9 @@
+[
+  {"_id": "sub_a", "user_id": "u_anna", "email": "anna@example.com", "status": "active", "plan": "monthly", "price": 9.99, "currency": "USD", "provider": "acmepay"},
+  {"_id": "sub_b", "user_id": "u_anna", "email": "anna@example.com", "status": "active", "plan": "monthly", "price": 9.99, "currency": "USD", "provider": "globexpay"},
+  {"_id": "sub_d", "user_id": "u_carl", "email": "carl@example.com", "status": "active", "plan": "monthly", "price": 19.99, "currency": "EUR", "provider": "globexpay"},
+  {"_id": "sub_e", "user_id": "u_carl", "email": "carl@example.com", "status": "canceled", "plan": "monthly", "price": 19.99, "currency": "EUR", "provider": "acmepay"},
+  {"_id": "sub_f", "user_id": "u_dana", "email": "dana@example.com", "status": "active", "plan": "annual", "price": 99.0, "currency": "USD", "provider": "acmepay"},
+  {"_id": "sub_g", "user_id": "u_emil", "email": "emil@example.com", "status": "active", "plan": "monthly", "price": 1200.0, "currency": "JPY", "provider": "acmepay"},
+  {"_id": "sub_h", "user_id": "u_emil", "email": "emil@example.com", "status": "active", "plan": "monthly", "price": 1200.0, "currency": "JPY", "provider": "acmepay"}
+]
