@@ -1,0 +1,49 @@
+# A subscription shop with planted money bugs, and money-checks watching it.
+#   docker compose build && docker compose up    serve: http://127.0.0.1:8080/metrics (MC_PORT to change)
+#   docker compose run --rm money-checks run -c /etc/money-checks/checks.yaml
+name: money-checks-example
+
+services:
+  mongo:
+    image: mongo:8
+    environment:
+      MONGO_INITDB_ROOT_USERNAME: root
+      MONGO_INITDB_ROOT_PASSWORD: root
+    volumes:
+      - ./mongo-init:/docker-entrypoint-initdb.d:ro
+      - ./seed/mongo:/seed:ro
+    healthcheck:
+      # Passes only once the seed has run and the read-only user exists.
+      test: ["CMD", "mongosh", "-u", "checks", "-p", "checks", "--authenticationDatabase", "shop", "--quiet", "--eval", "db.getSiblingDB('shop').wallets.countDocuments()"]
+      interval: 2s
+      retries: 30
+
+  postgres:
+    image: postgres:17-alpine
+    environment:
+      POSTGRES_USER: shop
+      POSTGRES_PASSWORD: shop
+      POSTGRES_DB: shop
+    volumes:
+      - ./postgres/ledger.sql:/docker-entrypoint-initdb.d/1-ledger.sql:ro
+      - ./postgres/readonly.sql:/docker-entrypoint-initdb.d/2-readonly.sql:ro
+    healthcheck:
+      # Over TCP: during init the server listens on the socket only.
+      test: ["CMD", "pg_isready", "-h", "127.0.0.1", "-U", "shop", "-d", "shop"]
+      interval: 2s
+      retries: 30
+
+  money-checks:
+    build: ../..
+    user: "${MC_UID:-65532}:${MC_GID:-65532}"
+    environment:
+      SHOP_MONGO_URI: mongodb://checks:checks@mongo:27017/?authSource=shop
+      LEDGER_PG_DSN: postgres://checks:checks@postgres:5432/shop
+    volumes:
+      - ./checks.yaml:/etc/money-checks/checks.yaml:ro
+      - ./out:/out
+    ports:
+      - "127.0.0.1:${MC_PORT:-8080}:8080"
+    depends_on:
+      mongo: {condition: service_healthy}
+      postgres: {condition: service_healthy}

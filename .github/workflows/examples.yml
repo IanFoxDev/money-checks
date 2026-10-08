@@ -1,0 +1,38 @@
+name: examples
+
+on:
+  push:
+    branches: [master]
+  pull_request:
+
+jobs:
+  subscriptions:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: examples/subscriptions
+    steps:
+      - uses: actions/checkout@v7
+      - run: docker compose build
+      - name: Run the checks against the shop
+        run: |
+          mkdir -p out
+          set +e
+          MC_UID=$(id -u) MC_GID=$(id -g) docker compose run --rm money-checks \
+            run -c /etc/money-checks/checks.yaml --json /out/report.json > out/report.md
+          code=$?
+          set -e
+          cat out/report.md
+          # Violations are planted, so money-checks must exit with 1.
+          test "$code" -eq 1
+      - name: The report has exactly the planted violations
+        run: |
+          diff <(jq -S '[.checks[] | {(.name): {status, violations, totals: ((.totals | map({(.currency): .amount}) | add) // {})}}] | add' out/report.json) \
+               <(jq -S . expected.json)
+      - name: serve exposes the same numbers
+        run: |
+          docker compose up -d money-checks
+          for i in $(seq 1 60); do curl -sf 127.0.0.1:8080/readyz && break; sleep 1; done
+          curl -s 127.0.0.1:8080/metrics | grep -x 'money_check_violations{check="unbalanced_transactions",severity="error"} 3'
+      - if: always()
+        run: docker compose down -v
