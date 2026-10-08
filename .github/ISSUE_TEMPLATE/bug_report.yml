@@ -1,0 +1,36 @@
+name: Bug report
+description: money-checks reports something wrong, misses a row, fails on a valid value, or could write
+labels: ["bug"]
+body:
+  - type: input
+    id: version
+    attributes:
+      label: money-checks version (money-checks version)
+    validations:
+      required: true
+  - type: input
+    id: database
+    attributes:
+      label: Database and version (MongoDB 8.0, PostgreSQL 17, ...)
+    validations:
+      required: true
+  - type: textarea
+    id: check
+    attributes:
+      label: The check from checks.yaml
+      render: yaml
+    validations:
+      required: true
+  - type: textarea
+    id: data
+    attributes:
+      label: A few documents or rows that show the problem
+      description: Replace real ids, emails and amounts; keep the types (double, Decimal128, numeric, string).
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: What money-checks did and what you expected
+    validations:
+      required: true

@@ -1,0 +1,24 @@
+name: Check recipe
+description: A check that caught a real money bug, to add to the examples
+labels: ["recipe"]
+body:
+  - type: textarea
+    id: bug
+    attributes:
+      label: The bug it catches
+      description: What went wrong in your system and what it cost, in your own words. No company or customer names needed.
+    validations:
+      required: true
+  - type: textarea
+    id: check
+    attributes:
+      label: The check
+      render: yaml
+    validations:
+      required: true
+  - type: textarea
+    id: data
+    attributes:
+      label: Made-up documents or rows that trigger it, and some that must not
+    validations:
+      required: true
