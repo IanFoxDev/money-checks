@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"math"
 	"math/big"
+	"strings"
 
 	"github.com/ianfoxdev/money-checks/internal/config"
 	"github.com/ianfoxdev/money-checks/internal/money"
@@ -36,8 +37,24 @@ type Decimal struct {
 	Scale int
 }
 
+// String writes the value as a plain decimal: 1099e-2 is "10.99", 11e2 is "1100".
 func (d Decimal) String() string {
-	return fmt.Sprintf("%se%d", d.Coef, d.Scale)
+	s := new(big.Int).Abs(d.Coef).String()
+	sign := ""
+	if d.Coef.Sign() < 0 {
+		sign = "-"
+	}
+	switch {
+	case d.Scale >= 0:
+		if d.Coef.Sign() != 0 {
+			s += strings.Repeat("0", d.Scale)
+		}
+	case len(s) <= -d.Scale:
+		s = "0." + strings.Repeat("0", -d.Scale-len(s)) + s
+	default:
+		s = s[:len(s)+d.Scale] + "." + s[len(s)+d.Scale:]
+	}
+	return sign + s
 }
 
 // Source runs checks against one database.

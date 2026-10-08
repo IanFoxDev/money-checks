@@ -64,3 +64,22 @@ func TestRowGet(t *testing.T) {
 		t.Error("Get(missing) found a column")
 	}
 }
+
+func TestDecimalString(t *testing.T) {
+	for _, tt := range []struct {
+		coef  int64
+		scale int
+		want  string
+	}{
+		{1099, -2, "10.99"},
+		{-1, -2, "-0.01"},
+		{5, -3, "0.005"},
+		{11, 2, "1100"},
+		{0, 3, "0"},
+		{7, 0, "7"},
+	} {
+		if got := (Decimal{Coef: big.NewInt(tt.coef), Scale: tt.scale}).String(); got != tt.want {
+			t.Errorf("%de%d = %q, want %q", tt.coef, tt.scale, got, tt.want)
+		}
+	}
+}
