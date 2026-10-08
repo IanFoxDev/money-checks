@@ -90,6 +90,12 @@ func Open(ctx context.Context, name string, s config.Source, warn func(string)) 
 // ErrAmount is wrapped by every error about an amount value.
 var ErrAmount = errors.New("bad amount")
 
+// amountError matches ErrAmount without repeating "bad amount" in the message.
+type amountError struct{ err error }
+
+func (e amountError) Error() string   { return e.err.Error() }
+func (e amountError) Unwrap() []error { return []error{ErrAmount, e.err} }
+
 // Minor turns an amount value into minor units of a currency with exp decimal
 // places. unit is "minor" (the value counts minor units) or "major".
 func Minor(v any, unit string, exp int) (int64, error) {
@@ -102,14 +108,14 @@ func Minor(v any, unit string, exp int) (int64, error) {
 	)
 	switch x := v.(type) {
 	case nil:
-		return 0, fmt.Errorf("%w: empty", ErrAmount)
+		return 0, amountError{errors.New("empty")}
 	case int64:
 		n, err = money.FromMajor(x, exp)
 	case int32:
 		n, err = money.FromMajor(int64(x), exp)
 	case float64:
 		if math.IsNaN(x) || math.IsInf(x, 0) {
-			return 0, fmt.Errorf("%w: %v", ErrAmount, x)
+			return 0, amountError{fmt.Errorf("%v is not an amount", x)}
 		}
 		n, err = money.FromFloat(x, exp)
 	case string:
@@ -117,10 +123,10 @@ func Minor(v any, unit string, exp int) (int64, error) {
 	case Decimal:
 		n, err = money.FromScaled(x.Coef, x.Scale, exp)
 	default:
-		return 0, fmt.Errorf("%w: %T is not a number", ErrAmount, v)
+		return 0, amountError{fmt.Errorf("%T is not a number", v)}
 	}
 	if err != nil {
-		return 0, fmt.Errorf("%w: %w", ErrAmount, err)
+		return 0, amountError{err}
 	}
 	return n, nil
 }
