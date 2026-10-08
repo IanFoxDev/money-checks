@@ -129,18 +129,34 @@ func TestPostgresRefusesWrites(t *testing.T) {
 
 // With the simple protocol, "select 1; commit; delete" would commit the read-only
 // transaction and delete in autocommit. The source forces the extended protocol,
-// which takes one statement.
-func TestPostgresIgnoresSimpleProtocolInDSN(t *testing.T) {
+// which takes one statement, whatever the DSN asks for. In pgx, Exec without
+// arguments always uses the simple protocol, so this also fails if the check query
+// ever goes through Exec. pgSchema checks after the test that no row is gone.
+func TestPostgresRunsOneStatement(t *testing.T) {
 	s := pgSchema(t)
 	dsn := os.Getenv("MC_PG")
 	sep := "?"
 	if strings.Contains(dsn, "?") {
 		sep = "&"
 	}
-	t.Setenv("MC_PG", dsn+sep+"default_query_exec_mode=simple_protocol")
-	_, err := collect(t, openPG(t), pgCheck("select 1; commit; delete from "+s+".payments"))
-	if err == nil {
-		t.Fatal("several statements ran")
+	for _, mode := range []string{"", "simple_protocol", "exec", "describe_exec", "cache_describe", "cache_statement"} {
+		t.Run("mode="+mode, func(t *testing.T) {
+			if mode == "" {
+				t.Setenv("MC_PG", dsn)
+			} else {
+				t.Setenv("MC_PG", dsn+sep+"default_query_exec_mode="+mode)
+			}
+			src := openPG(t)
+			for _, q := range []string{
+				"select 1; commit; delete from " + s + ".payments",
+				"commit; delete from " + s + ".payments returning id",
+				"rollback; start transaction read write; delete from " + s + ".payments; commit",
+			} {
+				if _, err := collect(t, src, pgCheck(q)); err == nil {
+					t.Errorf("%s: several statements ran", q)
+				}
+			}
+		})
 	}
 }
 
