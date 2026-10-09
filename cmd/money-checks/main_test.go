@@ -139,6 +139,25 @@ checks:
 	if code, _, _ := runCLI(t, "run", "-c", writeConfig(t, strings.Replace(conf, "SEVERITY", "warn", 1))); code != exitOK {
 		t.Errorf("warn: exit %d", code)
 	}
+
+	// The same violation, accepted in a known file next to the configuration.
+	path := writeConfig(t, strings.Replace(conf, "SEVERITY", "error", 1)+"known_file: known.yaml\n")
+	known := "version: 1\nknown:\n  - {check: refund_twice, id: p1, amount: 21.98 USD, reason: refunded by hand}\n"
+	if err := os.WriteFile(filepath.Join(filepath.Dir(path), "known.yaml"), []byte(known), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	code, out, errOut = runCLI(t, "run", "-c", path)
+	if code != exitOK {
+		t.Errorf("known: exit %d, stderr %q", code, errOut)
+	}
+	for _, want := range []string{
+		"| refund_twice | error | ok | 0 |  | 1 |",
+		"| p1 | 21.98 USD | a***@example.com | refunded by hand |",
+	} {
+		if !strings.Contains(out, want) {
+			t.Errorf("missing %q in\n%s", want, out)
+		}
+	}
 }
 
 func TestServeConfigErrors(t *testing.T) {
