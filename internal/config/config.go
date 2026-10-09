@@ -25,9 +25,13 @@ type Config struct {
 	Sources    map[string]Source `yaml:"sources"`
 	Checks     []Check           `yaml:"checks"`
 	Serve      Serve             `yaml:"serve"`
+	// KnownFile lists violations that are accepted, relative to this file.
+	KnownFile string `yaml:"known_file"`
 
 	// Money knows the currencies, with the overrides from Currencies.
 	Money money.Currencies `yaml:"-"`
+	// Known is KnownFile read: check name, then id.
+	Known map[string]map[string]Known `yaml:"-"`
 }
 
 // Defaults apply to every check that does not set its own value.
@@ -149,6 +153,7 @@ func Parse(data []byte, dir string) (Config, error) {
 	errs = append(errs, c.readFiles(dir)...)
 	c.applyDefaults()
 	errs = append(errs, c.check()...)
+	errs = append(errs, c.readKnown(dir)...)
 	if len(errs) > 0 {
 		return Config{}, errors.Join(errs...)
 	}
