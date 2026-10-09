@@ -53,14 +53,40 @@
           "fields": {
             "email": "b***@example.com",
             "note": ""
-          }
+          },
+          "note": "known at 5.00 USD (partial refund), the amount changed"
         }
       ],
       "duration_ms": 120,
-      "known": 0,
-      "known_totals": [],
-      "known_samples": [],
-      "resolved": []
+      "known": 2,
+      "known_totals": [
+        {
+          "currency": "USD",
+          "minor": 3098,
+          "amount": "30.98"
+        }
+      ],
+      "known_samples": [
+        {
+          "id": "{\"subscription\":\"s7\",\"period\":\"2026-08\"}",
+          "amount": {
+            "currency": "USD",
+            "minor": 2699,
+            "amount": "26.99"
+          },
+          "fields": {
+            "email": "c***@example.com",
+            "note": ""
+          },
+          "reason": "refunded by hand, FIN-12"
+        }
+      ],
+      "resolved": [
+        {
+          "id": "{\"subscription\":\"s0\",\"period\":\"2026-07\"}",
+          "reason": "fixed | in the data"
+        }
+      ]
     },
     {
       "name": "balance_matches_journal",
@@ -71,9 +97,14 @@
       "totals": [],
       "samples": [],
       "duration_ms": 40,
-      "known": 0,
+      "known": 1,
       "known_totals": [],
-      "known_samples": [],
+      "known_samples": [
+        {
+          "id": "u1",
+          "reason": "test account"
+        }
+      ],
       "resolved": []
     },
     {

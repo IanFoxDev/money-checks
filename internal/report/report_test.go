@@ -69,12 +69,46 @@ func TestJSON(t *testing.T) {
 	golden(t, "report.json", b.Bytes())
 }
 
+// withKnown is sample() with a known file: the first check has known violations,
+// one of them stale, and an entry that is gone; the second finds only known ones.
+func withKnown() check.Report {
+	r := sample()
+	usd := func(minor int64) *check.Money { return &check.Money{Currency: "USD", Minor: minor, Exponent: 2} }
+	reb := &r.Results[0]
+	reb.Samples[1].Note = "known at 5.00 USD (partial refund), the amount changed"
+	reb.Known = 2
+	reb.KnownTotals = []check.Money{{Currency: "USD", Minor: 3098, Exponent: 2}}
+	reb.KnownSamples = []check.Sample{
+		{ID: `{"subscription":"s7","period":"2026-08"}`, Amount: usd(2699), Fields: []check.Field{{Name: "email", Value: "c***@example.com"}, {Name: "note", Value: ""}}, Reason: "refunded by hand, FIN-12"},
+	}
+	reb.Resolved = []check.Resolved{{ID: `{"subscription":"s0","period":"2026-07"}`, Reason: "fixed | in the data"}}
+	r.Results[1].Known = 1
+	r.Results[1].KnownSamples = []check.Sample{{ID: "u1", Reason: "test account"}}
+	return r
+}
+
+func TestMarkdownKnown(t *testing.T) {
+	var b bytes.Buffer
+	if err := Markdown(&b, withKnown()); err != nil {
+		t.Fatal(err)
+	}
+	golden(t, "report_known.md", b.Bytes())
+}
+
+func TestJSONKnown(t *testing.T) {
+	var b bytes.Buffer
+	if err := JSON(&b, withKnown()); err != nil {
+		t.Fatal(err)
+	}
+	golden(t, "report_known.json", b.Bytes())
+}
+
 func TestJSONEmptyListsAreNotNull(t *testing.T) {
 	var b bytes.Buffer
 	if err := JSON(&b, check.Report{Results: []check.Result{{Name: "c", Status: check.StatusOK}}}); err != nil {
 		t.Fatal(err)
 	}
-	for _, want := range []string{`"warnings": []`, `"totals": []`, `"samples": []`} {
+	for _, want := range []string{`"warnings": []`, `"totals": []`, `"samples": []`, `"known_totals": []`, `"known_samples": []`, `"resolved": []`} {
 		if !bytes.Contains(b.Bytes(), []byte(want)) {
 			t.Errorf("missing %s in %s", want, b.String())
 		}
