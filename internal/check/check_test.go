@@ -3,6 +3,7 @@ package check
 import (
 	"context"
 	"errors"
+	"fmt"
 	"math"
 	"math/big"
 	"strings"
@@ -236,5 +237,85 @@ func TestMask(t *testing.T) {
 		if got := Mask(in); got != want {
 			t.Errorf("Mask(%q) = %q, want %q", in, got, want)
 		}
+	}
+}
+
+func TestRunKnown(t *testing.T) {
+	c := load(t, conf)
+	c.Checks = c.Checks[:1]
+	exp := time.Date(2026, 10, 8, 0, 0, 0, 0, time.UTC) // expired before the run
+	c.Known = map[string]map[string]config.Known{"rebills": {
+		"s1": {ID: "s1", Reason: "refunded by hand", Amount: &config.KnownAmount{Currency: "USD", Minor: 2699}},
+		"s2": {ID: "s2", Reason: "partial refund", Amount: &config.KnownAmount{Currency: "USD", Minor: 500}},
+		"s3": {ID: "s3", Reason: "until the migration", Until: "2026-10-07", Expires: exp},
+		"s4": {ID: "s4", Reason: "test account"},
+		"s9": {ID: "s9", Reason: "fixed in the data"},
+	}}
+	r := runFake(t, c, &fake{rows: map[string][]source.Row{"rebills": {
+		row("id,amount,currency,email,n", "s1", "26.99", "USD", "anna@example.com", int64(2)),
+		row("id,amount,currency,email,n", "s2", "10.10", "USD", nil, int64(2)),
+		row("id,amount,currency,email,n", "s3", "5.00", "EUR", nil, int64(2)),
+		row("id,amount,currency,email,n", "s4", "1.00", "EUR", nil, int64(2)),
+		row("id,amount,currency,email,n", "s5", "2.00", "USD", nil, int64(2)),
+	}}})
+	res := r.Results[0]
+	if res.Status != StatusViolations || res.Violations != 3 || res.Known != 2 {
+		t.Fatalf("got %+v", res)
+	}
+	if got := fmt.Sprint(res.Totals); got != "[5.00 EUR 12.10 USD]" {
+		t.Errorf("totals %s", got)
+	}
+	if got := fmt.Sprint(res.KnownTotals); got != "[1.00 EUR 26.99 USD]" {
+		t.Errorf("known totals %s", got)
+	}
+	notes := map[string]string{}
+	for _, s := range res.Samples {
+		notes[s.ID] = s.Note
+		if s.Reason != "" {
+			t.Errorf("%s counts as new but has reason %q", s.ID, s.Reason)
+		}
+	}
+	want := map[string]string{
+		"s2": "known at 5.00 USD (partial refund), the amount changed",
+		"s3": "known until 2026-10-07 (until the migration), expired",
+	}
+	for id, note := range want {
+		if notes[id] != note {
+			t.Errorf("%s: note %q, want %q", id, notes[id], note)
+		}
+	}
+	// samples: 2 in conf, for new and known violations each.
+	if len(res.Samples) != 2 || len(res.KnownSamples) != 2 {
+		t.Fatalf("%d samples, %d known samples", len(res.Samples), len(res.KnownSamples))
+	}
+	if k := res.KnownSamples[0]; k.ID != "s1" || k.Reason != "refunded by hand" || k.Fields[0].Value != "a***@example.com" {
+		t.Errorf("known sample %+v", k)
+	}
+	if len(res.Resolved) != 1 || res.Resolved[0] != (Resolved{ID: "s9", Reason: "fixed in the data"}) {
+		t.Errorf("resolved %+v", res.Resolved)
+	}
+}
+
+func TestRunOnlyKnownIsOK(t *testing.T) {
+	c := load(t, conf)
+	c.Checks = c.Checks[2:3]
+	c.Known = map[string]map[string]config.Known{"soft": {"7": {ID: "7", Reason: "r"}}}
+	r := runFake(t, c, &fake{rows: map[string][]source.Row{"soft": {row("id", int64(7))}}})
+	if res := r.Results[0]; res.Status != StatusOK || res.Violations != 0 || res.Known != 1 || len(res.Resolved) != 0 {
+		t.Errorf("got %+v", res)
+	}
+	if code := r.ExitCode(); code != 0 {
+		t.Errorf("exit code %d", code)
+	}
+}
+
+// A failed run says nothing about which known violations are gone.
+func TestRunFailedResolvesNothing(t *testing.T) {
+	c := load(t, conf)
+	c.Checks = c.Checks[1:2]
+	c.Known = map[string]map[string]config.Known{"clean": {"1": {ID: "1", Reason: "r"}}}
+	r := runFake(t, c, &fake{errs: map[string]error{"clean": errors.New("boom")}})
+	if res := r.Results[0]; res.Status != StatusFailed || len(res.Resolved) != 0 {
+		t.Errorf("got %+v", res)
 	}
 }
