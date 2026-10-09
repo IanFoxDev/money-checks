@@ -8,6 +8,22 @@ configuration, the report format or the metric names; such changes are marked
 
 ## [Unreleased]
 
+### Added
+
+- `known_file`: violations that were looked at and accepted, each with a required
+  reason, optionally with the amount it had and a date it stops applying. They do
+  not count towards `violations`, the status, the exit code or Slack; the report
+  lists them with their reasons and lists entries the check no longer finds. See
+  `docs/adr/0002-known-violations.md`.
+- The metric `money_check_known_violations{check}`.
+- The JSON report has `known`, `known_totals`, `known_samples` and `resolved` for
+  every check, and a `note` on samples that are in the known file but count again.
+
+### Changed
+
+- With a known file, `money_check_violations` and the totals count new violations
+  only. Without one nothing changes.
+
 ## [0.1.0] - 2026-10-08
 
 The first release: checks as MongoDB pipelines and PostgreSQL queries that must

@@ -13,6 +13,7 @@ defaults:
 sources: {...}
 checks: [...]
 serve: {...}               # only for money-checks serve
+known_file: known.yaml     # optional: violations that are accepted, see below
 ```
 
 ## sources
@@ -139,6 +140,39 @@ need money-checks to restart. With `slack`, a message is posted when a check sta
 finding violations, stops finding them, fails or runs again after failing. The first
 run posts only about checks that are not clean.
 
+## known_file
+
+Violations someone has looked at and accepted: a double charge that support refunded
+by hand, a test account. The path is relative to `checks.yaml`. Why this is a
+separate file and not a filter in the query: `docs/adr/0002-known-violations.md`.
+
+```yaml
+# known.yaml
+version: 1
+known:
+  - check: two_renewals_in_one_period
+    id: '{"subscription":"sub_a","period":"2026-09"}'   # as the report prints it
+    reason: refunded by hand on 2026-09-30, ticket FIN-12   # required
+    amount: 9.99 USD       # optional: if the amount changes, the row counts again
+    until: 2026-12-31      # optional: from 2027-01-01 UTC the row counts again
+```
+
+| Key | | |
+|---|---|---|
+| `check` | required | the name of a check in `checks.yaml` |
+| `id` | required | the id exactly as the report shows it; quote ids with `{` or `:` |
+| `reason` | required | why the row is accepted; an entry without a reason is an error |
+| `amount` | | amount and currency, `26.99 USD`; only for checks with `amount` |
+| `until` | | a date, `2026-12-31`; the entry applies through the end of that day, UTC |
+
+A row with an entry does not count: it is not in `violations`, the totals, the
+status, the exit code or Slack. The report lists it in a separate table with the
+reason, and `/metrics` counts it in `money_check_known_violations`. A row whose entry
+expired or whose amount changed counts again, with a note that says which. An entry
+the check no longer finds is listed under "no longer found", so it can be removed.
+
+`serve` reads the file at start; restart it after a change.
+
 ## Command line
 
 ```
@@ -170,7 +204,13 @@ stderr. `serve` logs JSON to stderr and stops on SIGINT or SIGTERM.
       "samples": [
         {"id": "...", "amount": {"currency": "USD", "minor": 999, "amount": "9.99"}, "fields": {"n": "2"}}
       ],
-      "duration_ms": 12
+      "duration_ms": 12,
+      "known": 1,
+      "known_totals": [{"currency": "USD", "minor": 2699, "amount": "26.99"}],
+      "known_samples": [
+        {"id": "...", "amount": {"currency": "USD", "minor": 2699, "amount": "26.99"}, "reason": "refunded by hand, FIN-12"}
+      ],
+      "resolved": [{"id": "...", "reason": "test account, deleted"}]
     }
   ]
 }
@@ -178,4 +218,7 @@ stderr. `serve` logs JSON to stderr and stops on SIGINT or SIGTERM.
 
 `status` is `ok`, `violations` or `failed` (then `error` has the reason). Amounts are
 given twice, as integer minor units and as a decimal string, never as a JSON number
-with a fraction. Lists are never null.
+with a fraction. Lists are never null. `violations`, `totals` and `samples` are about
+new violations; `known*` are the rows the known file accepts, and `resolved` lists
+its entries the check no longer finds. A sample that is in the known file but counts
+again has a `note` that says why.

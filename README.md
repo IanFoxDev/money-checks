@@ -89,7 +89,8 @@ against a staging copy.
 
 | Metric | Labels | |
 |---|---|---|
-| `money_check_violations` | `check`, `severity` | rows the check returned on its last successful run |
+| `money_check_violations` | `check`, `severity` | rows the check returned on its last successful run, not counting known violations |
+| `money_check_known_violations` | `check` | rows the known file accepts |
 | `money_check_amount_minor_units` | `check`, `currency` | total of those rows in minor units (cents for USD) |
 | `money_check_up` | `check` | 1 if the last run finished, 0 if it failed |
 | `money_check_last_success_timestamp_seconds` | `check` | when the check last finished |
@@ -119,6 +120,33 @@ groups:
 With `serve.slack.webhook_env` set, a message goes to Slack when a check changes
 state: it starts finding violations, stops finding them, fails or recovers. Not on
 every run. Messages carry the check name, the count and the totals, never rows.
+
+## Known violations
+
+The first run against a real database usually finds old rows that were looked at
+long ago: a double charge refunded by hand, a test account. List them in a known
+file with the reason, and the check reports only what is new:
+
+```yaml
+# checks.yaml
+known_file: known.yaml
+
+# known.yaml
+version: 1
+known:
+  - check: two_renewals_in_one_period
+    id: '{"subscription":"sub_a","period":"2026-09"}'
+    reason: refunded by hand on 2026-09-30, ticket FIN-12
+    amount: 9.99 USD
+    until: 2026-12-31
+```
+
+Known violations do not change the status, the exit code or the alert, and they are
+not posted to Slack. They are not hidden either: the report lists them with their
+reasons, `money_check_known_violations` counts them, and an entry the check no
+longer finds is listed so it can be removed. If the amount changes or `until`
+passes, the row counts again. A reason is required. See `docs/config.md` and
+`docs/adr/0002-known-violations.md`.
 
 ## Money
 
