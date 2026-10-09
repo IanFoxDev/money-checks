@@ -228,3 +228,32 @@ func TestDescribeSeveralCurrencies(t *testing.T) {
 		t.Errorf("%q", n.msgs)
 	}
 }
+
+// A known violation is exported on its own gauge and is not news for Slack.
+func TestKnownViolations(t *testing.T) {
+	src := &script{runs: [][]source.Row{
+		{r("u1", 999, "USD")},
+		{r("u1", 999, "USD"), r("u2", 500, "EUR")},
+	}}
+	s, n := newServer(t, src)
+	s.cfg.Known = map[string]map[string]config.Known{"two_active_subscriptions": {"u1": {ID: "u1", Reason: "test account"}}}
+	ctx := context.Background()
+
+	s.Cycle(ctx)
+	has(t, scrape(t, s),
+		`money_check_violations{check="two_active_subscriptions",severity="error"} 0`,
+		`money_check_known_violations{check="two_active_subscriptions"} 1`,
+	)
+	if strings.Contains(scrape(t, s), "money_check_amount_minor_units{") {
+		t.Error("the amount of a known violation is exported")
+	}
+	s.Cycle(ctx)
+	has(t, scrape(t, s),
+		`money_check_violations{check="two_active_subscriptions",severity="error"} 1`,
+		`money_check_amount_minor_units{check="two_active_subscriptions",currency="EUR"} 500`,
+	)
+	want := "money-checks: two_active_subscriptions found 1 violation (5.00 EUR) [error]"
+	if strings.Join(n.msgs, "\n") != want {
+		t.Errorf("messages %q", n.msgs)
+	}
+}

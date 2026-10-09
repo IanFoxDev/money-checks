@@ -12,6 +12,7 @@ import (
 type metrics struct {
 	runs        prometheus.Counter
 	violations  *prometheus.GaugeVec
+	known       *prometheus.GaugeVec
 	amount      *prometheus.GaugeVec
 	up          *prometheus.GaugeVec
 	lastSuccess *prometheus.GaugeVec
@@ -25,8 +26,11 @@ func newMetrics(reg prometheus.Registerer) *metrics {
 			Name: "money_checks_runs_total", Help: "Runs of all checks.",
 		}),
 		violations: prometheus.NewGaugeVec(prometheus.GaugeOpts{
-			Name: "money_check_violations", Help: "Rows the check returned on its last successful run.",
+			Name: "money_check_violations", Help: "Rows the check returned on its last successful run, not counting known violations.",
 		}, []string{"check", "severity"}),
+		known: prometheus.NewGaugeVec(prometheus.GaugeOpts{
+			Name: "money_check_known_violations", Help: "Rows of the last successful run that the known file accepts.",
+		}, []string{"check"}),
 		// Minor units are integers; a float64 holds them exactly up to 2^53.
 		amount: prometheus.NewGaugeVec(prometheus.GaugeOpts{
 			Name: "money_check_amount_minor_units", Help: "Total amount of the violations in minor units of the currency, last successful run.",
@@ -44,7 +48,7 @@ func newMetrics(reg prometheus.Registerer) *metrics {
 			Name: "money_check_errors_total", Help: "Runs of the check that failed.",
 		}, []string{"check"}),
 	}
-	reg.MustRegister(m.runs, m.violations, m.amount, m.up, m.lastSuccess, m.duration, m.errors)
+	reg.MustRegister(m.runs, m.violations, m.known, m.amount, m.up, m.lastSuccess, m.duration, m.errors)
 	return m
 }
 
@@ -62,6 +66,7 @@ func (m *metrics) update(res check.Result, now time.Time) {
 	m.up.WithLabelValues(res.Name).Set(1)
 	m.lastSuccess.WithLabelValues(res.Name).Set(float64(now.Unix()))
 	m.violations.WithLabelValues(res.Name, res.Severity).Set(float64(res.Violations))
+	m.known.WithLabelValues(res.Name).Set(float64(res.Known))
 	// A currency that is gone from the totals must not keep its old value.
 	m.amount.DeletePartialMatch(prometheus.Labels{"check": res.Name})
 	for _, t := range res.Totals {
