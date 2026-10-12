@@ -34,9 +34,11 @@ const usage = `usage:
       run every check once; the Markdown report goes to stdout unless a file is given
   money-checks serve -c checks.yaml
       run the checks now and every serve.interval; /metrics, /healthz, /readyz on serve.listen
+  money-checks known add -c checks.yaml --check NAME --reason TEXT [--until DATE] [--limit N]
+      run one check and add its new violations to the known file
   money-checks version
 
-exit codes: 0 no violations of severity error, 1 violations found, 2 a check failed`
+exit codes of run: 0 no violations of severity error, 1 violations found, 2 a check failed`
 
 func main() {
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
@@ -58,6 +60,12 @@ func run(ctx context.Context, args []string, stdout, stderr io.Writer, open chec
 		return runChecks(ctx, args[1:], stdout, stderr, open, now)
 	case "serve":
 		return serveChecks(ctx, args[1:], stderr, open, now)
+	case "known":
+		if len(args) > 1 && args[1] == "add" {
+			return knownAdd(ctx, args[2:], stdout, stderr, open, now)
+		}
+		fmt.Fprintln(stderr, usage)
+		return exitError
 	default:
 		fmt.Fprintln(stderr, usage)
 		return exitError
