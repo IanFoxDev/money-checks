@@ -16,6 +16,8 @@ configuration, the report format or the metric names; such changes are marked
   lists them with their reasons and lists entries the check no longer finds. See
   `docs/adr/0002-known-violations.md`.
 - The metric `money_check_known_violations{check}`.
+- `money-checks known add`: runs one check and appends its new violations to the
+  known file, with a reason, the amounts and an optional `until`.
 - The JSON report has `known`, `known_totals`, `known_samples` and `resolved` for
   every check, and a `note` on samples that are in the known file but count again.
 

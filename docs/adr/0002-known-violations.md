@@ -53,5 +53,8 @@ from a report. Matching is exact.
   period.
 - `serve` reads the file at start. A change needs a restart, as a change to
   `checks.yaml` does.
-- Writing a hundred entries by hand after a first run is tedious. A command that
-  turns a JSON report into entries is a separate step.
+- Writing a hundred entries by hand after a first run is tedious. `known add` runs
+  the check and appends its new violations with one reason. It runs the check
+  rather than reading a report, because a report holds samples, not every row; the
+  rows it adds can differ from the report someone read, so the diff is what gets
+  reviewed.

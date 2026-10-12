@@ -173,19 +173,31 @@ reason, and `/metrics` counts it in `money_check_known_violations`. A row whose 
 expired or whose amount changed counts again, with a note that says which. An entry
 the check no longer finds is listed under "no longer found", so it can be removed.
 
-`serve` reads the file at start; restart it after a change.
+`serve` reads the file at start; restart it after a change. `known add` writes the
+entries for you after a first run, see below.
 
 ## Command line
 
 ```
 money-checks run -c checks.yaml [--markdown file] [--json file]
 money-checks serve -c checks.yaml
+money-checks known add -c checks.yaml --check NAME --reason TEXT [--until DATE] [--limit N]
 money-checks version
 ```
 
 `run` writes the Markdown report to stdout unless `--markdown` names a file, and the
 JSON report when `--json` is given. Warnings and the errors of failed checks go to
 stderr. `serve` logs JSON to stderr and stops on SIGINT or SIGTERM.
+
+`known add` runs one check and appends every new violation it finds to the known
+file: one entry per row, with the reason, the amount and `until` when given. It runs
+the check again instead of reading a report, because a report has samples, not every
+row. It refuses when the check finds more than `--limit` rows (100 by default) and
+skips rows whose entry expired or whose amount changed; edit those entries by hand.
+The file is created if it does not exist. Appending needs the `known` list to be the
+last key of the file; otherwise nothing is written and the entries are printed to
+add by hand. Exit code 0 when entries were added or there was nothing to add, 2 on
+an error.
 
 ## The JSON report
 

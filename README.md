@@ -148,6 +148,16 @@ longer finds is listed so it can be removed. If the amount changes or `until`
 passes, the row counts again. A reason is required. See `docs/config.md` and
 `docs/adr/0002-known-violations.md`.
 
+After a first run, look at what a check found and accept it in one step:
+
+```
+money-checks known add -c checks.yaml --check refund_twice \
+  --reason "refunded by hand in 2025, ticket FIN-12" --until 2026-12-31
+```
+
+It runs the check and adds an entry for every new violation, with its amount. It
+stops at `--limit` rows, 100 by default. Review the diff of the known file like code.
+
 ## Money
 
 Amounts are `int64` minor units with the ISO 4217 exponent of their currency, from
