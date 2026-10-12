@@ -21,6 +21,10 @@ configuration, the report format or the metric names; such changes are marked
 
 ### Changed
 
+- **BREAKING** An ObjectId, a date or a decimal inside a document or an array (a
+  compound `_id` from `$group`) is written as hex, RFC 3339 or a decimal string, as at
+  the top level: `{"user":"652f..."}` instead of `{"user":{"$oid":"652f..."}}`. Ids in
+  reports change for such checks.
 - With a known file, `money_check_violations` and the totals count new violations
   only. Without one nothing changes.
 

@@ -94,8 +94,10 @@ and `$lookup`. Each pipeline gets a comment `money-checks: <name>`, so it can be
 in `currentOp` and the profiler.
 
 A document or an array in a column, such as a compound `_id` from `$group`, is shown
-as relaxed Extended JSON. To show an ObjectId inside one as plain hex, convert it in
-the pipeline with `$toString`.
+as JSON with its keys in order. ObjectIds, dates and decimals inside it are written as
+they are at the top level: `{"user":"652f1c9e8a1b2c3d4e5f6071","period":"2026-09"}`.
+Other BSON types keep their relaxed Extended JSON form. This text is what a known file
+matches, so it does not change between runs.
 
 ### amount
 
