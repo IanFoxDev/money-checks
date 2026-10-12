@@ -164,7 +164,10 @@ func (m *mongodb) Close(ctx context.Context) error {
 }
 
 // mongoValue turns a BSON value into one of the Row value types. Documents and
-// arrays, such as a compound _id from $group, become relaxed Extended JSON text.
+// arrays, such as a compound _id from $group, become relaxed Extended JSON text,
+// with ObjectIds, dates and decimals inside written as at the top level:
+// {"user":"652f...","period":"2026-09"}, not {"user":{"$oid":"652f..."}}. Known
+// files match ids by this text.
 func mongoValue(v any) any {
 	switch x := v.(type) {
 	case nil, bson.Null, bson.Undefined:
@@ -184,9 +187,9 @@ func mongoValue(v any) any {
 	case bson.DateTime:
 		return x.Time().UTC().Format(time.RFC3339Nano)
 	case bson.D:
-		return extJSON(x)
+		return extJSON(plain(x).(bson.D))
 	case bson.A:
-		b, err := bson.MarshalExtJSON(bson.D{{Key: "v", Value: x}}, false, false)
+		b, err := bson.MarshalExtJSON(bson.D{{Key: "v", Value: plain(x)}}, false, false)
 		if err != nil {
 			return fmt.Sprint(x)
 		}
@@ -194,6 +197,31 @@ func mongoValue(v any) any {
 		return string(bytes.TrimSuffix(bytes.TrimPrefix(b, []byte(`{"v":`)), []byte("}")))
 	default:
 		return fmt.Sprint(x)
+	}
+}
+
+// plain replaces ObjectIds, dates and decimals inside documents and arrays with
+// the strings mongoValue gives them at the top level. Key order is kept.
+func plain(v any) any {
+	switch x := v.(type) {
+	case bson.D:
+		out := make(bson.D, len(x))
+		for i, e := range x {
+			out[i] = bson.E{Key: e.Key, Value: plain(e.Value)}
+		}
+		return out
+	case bson.A:
+		out := make(bson.A, len(x))
+		for i, e := range x {
+			out[i] = plain(e)
+		}
+		return out
+	case bson.ObjectID, bson.DateTime:
+		return mongoValue(x)
+	case bson.Decimal128:
+		return x.String()
+	default:
+		return v
 	}
 }
 

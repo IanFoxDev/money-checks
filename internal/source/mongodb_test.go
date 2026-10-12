@@ -60,6 +60,27 @@ func TestPipelineKeepsOrderAndExtendedJSON(t *testing.T) {
 	}
 }
 
+// Ids from $group are matched against known files by their text, so nested values
+// read like top-level ones: hex, not {"$oid": ...}.
+func TestMongoValueNested(t *testing.T) {
+	oid, _ := bson.ObjectIDFromHex("652f1c9e8a1b2c3d4e5f6071")
+	dec, _ := bson.ParseDecimal128("10.99")
+	at := bson.NewDateTimeFromTime(time.Date(2026, 9, 1, 0, 0, 0, 0, time.UTC))
+	for _, tt := range []struct {
+		in   any
+		want string
+	}{
+		{bson.D{{Key: "user", Value: oid}, {Key: "period", Value: "2026-09"}}, `{"user":"652f1c9e8a1b2c3d4e5f6071","period":"2026-09"}`},
+		{bson.D{{Key: "z", Value: int32(1)}, {Key: "a", Value: bson.D{{Key: "at", Value: at}, {Key: "amount", Value: dec}}}}, `{"z":1,"a":{"at":"2026-09-01T00:00:00Z","amount":"10.99"}}`},
+		{bson.A{oid, int64(7), nil}, `["652f1c9e8a1b2c3d4e5f6071",7,null]`},
+		{bson.D{{Key: "b", Value: bson.Binary{Data: []byte{1}}}}, `{"b":{"$binary":{"base64":"AQ==","subType":"00"}}}`},
+	} {
+		if got := mongoValue(tt.in); got != tt.want {
+			t.Errorf("%v: %#v, want %s", tt.in, got, tt.want)
+		}
+	}
+}
+
 func TestPipelineRefusesWrites(t *testing.T) {
 	for _, p := range []string{
 		`[{$match: {}}, {$out: copy}]`,
