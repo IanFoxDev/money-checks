@@ -54,16 +54,28 @@ func (c *Config) readKnown(dir string) []error {
 	if c.KnownFile == "" {
 		return nil
 	}
-	path := filepath.Join(dir, c.KnownFile)
-	data, err := os.ReadFile(path)
+	data, err := os.ReadFile(filepath.Join(dir, c.KnownFile))
 	if err != nil {
 		return []error{fmt.Errorf("known_file: %w", err)}
 	}
+	known, errs := c.parseKnown(data)
+	c.Known = known
+	return errs
+}
+
+// ParseKnown reads data as the known file of this configuration, without changing
+// it: a tool that edits the file checks the result before writing it.
+func (c Config) ParseKnown(data []byte) (map[string]map[string]Known, error) {
+	known, errs := c.parseKnown(data)
+	return known, errors.Join(errs...)
+}
+
+func (c Config) parseKnown(data []byte) (map[string]map[string]Known, []error) {
 	dec := yaml.NewDecoder(bytes.NewReader(data))
 	dec.KnownFields(true)
 	var f knownFile
 	if err := dec.Decode(&f); err != nil {
-		return []error{fmt.Errorf("known_file %s: %w", c.KnownFile, err)}
+		return nil, []error{fmt.Errorf("known_file %s: %w", c.KnownFile, err)}
 	}
 	checks := map[string]Check{}
 	for _, ch := range c.Checks {
@@ -73,7 +85,7 @@ func (c *Config) readKnown(dir string) []error {
 	if f.Version != 1 {
 		errs = append(errs, fmt.Errorf("known_file %s: version: want 1, got %d", c.KnownFile, f.Version))
 	}
-	c.Known = map[string]map[string]Known{}
+	known := map[string]map[string]Known{}
 	for i, e := range f.Known {
 		where := fmt.Sprintf("known_file %s: known[%d]", c.KnownFile, i)
 		k, entryErrs := c.knownEntry(e, checks)
@@ -83,19 +95,19 @@ func (c *Config) readKnown(dir string) []error {
 		if len(entryErrs) > 0 {
 			continue
 		}
-		if c.Known[k.Check] == nil {
-			c.Known[k.Check] = map[string]Known{}
+		if known[k.Check] == nil {
+			known[k.Check] = map[string]Known{}
 		}
-		if _, dup := c.Known[k.Check][k.ID]; dup {
+		if _, dup := known[k.Check][k.ID]; dup {
 			errs = append(errs, fmt.Errorf("%s: check %s, id %s is listed twice", where, k.Check, k.ID))
 			continue
 		}
-		c.Known[k.Check][k.ID] = k
+		known[k.Check][k.ID] = k
 	}
-	return errs
+	return known, errs
 }
 
-func (c *Config) knownEntry(e knownEntry, checks map[string]Check) (Known, []error) {
+func (c Config) knownEntry(e knownEntry, checks map[string]Check) (Known, []error) {
 	var errs []error
 	k := Known{Check: e.Check, ID: e.ID, Reason: strings.TrimSpace(e.Reason), Until: e.Until}
 	ch, ok := checks[e.Check]
@@ -133,7 +145,7 @@ func (c *Config) knownEntry(e knownEntry, checks map[string]Check) (Known, []err
 }
 
 // knownAmount reads "26.99 USD".
-func (c *Config) knownAmount(s string) (KnownAmount, error) {
+func (c Config) knownAmount(s string) (KnownAmount, error) {
 	num, code, ok := strings.Cut(strings.TrimSpace(s), " ")
 	code = strings.ToUpper(strings.TrimSpace(code))
 	if !ok || code == "" {
