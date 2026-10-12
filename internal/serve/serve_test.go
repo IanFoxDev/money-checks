@@ -18,11 +18,13 @@ import (
 
 // script is a source whose rows for the one check change from run to run.
 type script struct {
-	runs [][]source.Row // rows per run; nil means the query fails
-	n    int
+	runs  [][]source.Row // rows per run; nil means the query fails
+	n     int
+	since []time.Time // what each run got
 }
 
-func (s *script) Query(_ context.Context, _ config.Check, each func(source.Row) error) error {
+func (s *script) Query(_ context.Context, _ config.Check, since time.Time, each func(source.Row) error) error {
+	s.since = append(s.since, since)
 	rows := s.runs[s.n]
 	s.n++
 	if rows == nil {
@@ -127,11 +129,11 @@ func TestMetrics(t *testing.T) {
 
 	s.Cycle(ctx)
 	has(t, scrape(t, s),
-		`money_check_violations{check="two_active_subscriptions",severity="error"} 2`,
-		`money_check_amount_minor_units{check="two_active_subscriptions",currency="EUR"} 500`,
-		`money_check_amount_minor_units{check="two_active_subscriptions",currency="USD"} 999`,
+		`money_check_violations{check="two_active_subscriptions",scope="full",severity="error"} 2`,
+		`money_check_amount_minor_units{check="two_active_subscriptions",currency="EUR",scope="full"} 500`,
+		`money_check_amount_minor_units{check="two_active_subscriptions",currency="USD",scope="full"} 999`,
 		`money_check_up{check="two_active_subscriptions"} 1`,
-		`money_check_last_success_timestamp_seconds{check="two_active_subscriptions"} 1.7914e+09`,
+		`money_check_last_success_timestamp_seconds{check="two_active_subscriptions",scope="full"} 1.7914e+09`,
 		`money_check_errors_total{check="two_active_subscriptions"} 0`,
 		`money_checks_runs_total 1`,
 	)
@@ -141,14 +143,14 @@ func TestMetrics(t *testing.T) {
 	if strings.Contains(body, `currency="EUR"`) {
 		t.Error("EUR is gone from the totals but still exported")
 	}
-	has(t, body, `money_check_violations{check="two_active_subscriptions",severity="error"} 1`)
+	has(t, body, `money_check_violations{check="two_active_subscriptions",scope="full",severity="error"} 1`)
 
 	s.Cycle(ctx) // fails: up drops, the last known numbers stay
 	has(t, scrape(t, s),
 		`money_check_up{check="two_active_subscriptions"} 0`,
 		`money_check_errors_total{check="two_active_subscriptions"} 1`,
-		`money_check_violations{check="two_active_subscriptions",severity="error"} 1`,
-		`money_check_amount_minor_units{check="two_active_subscriptions",currency="USD"} 999`,
+		`money_check_violations{check="two_active_subscriptions",scope="full",severity="error"} 1`,
+		`money_check_amount_minor_units{check="two_active_subscriptions",currency="USD",scope="full"} 999`,
 	)
 }
 
@@ -241,19 +243,74 @@ func TestKnownViolations(t *testing.T) {
 
 	s.Cycle(ctx)
 	has(t, scrape(t, s),
-		`money_check_violations{check="two_active_subscriptions",severity="error"} 0`,
-		`money_check_known_violations{check="two_active_subscriptions"} 1`,
+		`money_check_violations{check="two_active_subscriptions",scope="full",severity="error"} 0`,
+		`money_check_known_violations{check="two_active_subscriptions",scope="full"} 1`,
 	)
 	if strings.Contains(scrape(t, s), "money_check_amount_minor_units{") {
 		t.Error("the amount of a known violation is exported")
 	}
 	s.Cycle(ctx)
 	has(t, scrape(t, s),
-		`money_check_violations{check="two_active_subscriptions",severity="error"} 1`,
-		`money_check_amount_minor_units{check="two_active_subscriptions",currency="EUR"} 500`,
+		`money_check_violations{check="two_active_subscriptions",scope="full",severity="error"} 1`,
+		`money_check_amount_minor_units{check="two_active_subscriptions",currency="EUR",scope="full"} 500`,
 	)
 	want := "money-checks: two_active_subscriptions found 1 violation (5.00 EUR) [error]"
 	if strings.Join(n.msgs, "\n") != want {
 		t.Errorf("messages %q", n.msgs)
 	}
+}
+
+// serve reads every row at start and every full_every, the window in between.
+// Violations in the window are news; a row that leaves the window is not fixed,
+// so only a full run says that violations are gone. The gauges keep one series
+// per scope.
+func TestCycleWindow(t *testing.T) {
+	cfg, err := config.Parse([]byte(strings.Replace(conf, "query: q", "query: select $1\n    window: 1h", 1)+"serve: {full_every: 1h}\n"), ".")
+	if err != nil {
+		t.Fatal(err)
+	}
+	src := &script{runs: [][]source.Row{
+		{r("u1", 999, "USD")}, // 0m, full: an old violation
+		{},                    // 10m, window: it is older than the window
+		{r("u2", 500, "EUR")}, // 20m, window: a new one
+		{},                    // 30m, window: u2 is gone from the window, not news
+		{},                    // 60m, full: both fixed
+	}}
+	t0 := time.Unix(1791400000, 0)
+	at := t0
+	n := &notes{}
+	open := func(context.Context, string, config.Source, func(string)) (source.Source, error) { return src, nil }
+	s := New(cfg, open, n, slog.New(slog.NewTextHandler(io.Discard, nil)), func() time.Time { return at })
+	ctx := context.Background()
+	for i, m := range []int{0, 10, 20, 30, 60} {
+		at = t0.Add(time.Duration(m) * time.Minute)
+		s.Cycle(ctx)
+		if i == 2 {
+			has(t, scrape(t, s),
+				`money_check_violations{check="two_active_subscriptions",scope="full",severity="error"} 1`,
+				`money_check_violations{check="two_active_subscriptions",scope="window",severity="error"} 1`,
+				`money_check_amount_minor_units{check="two_active_subscriptions",currency="USD",scope="full"} 999`,
+				`money_check_amount_minor_units{check="two_active_subscriptions",currency="EUR",scope="window"} 500`,
+			)
+		}
+	}
+	var got []string
+	for i, since := range src.since {
+		got = append(got, since.Sub(t0).String())
+		if since.IsZero() {
+			got[i] = "all"
+		}
+	}
+	if want := "all -50m0s -40m0s -30m0s all"; strings.Join(got, " ") != want {
+		t.Errorf("since %s, want %s", strings.Join(got, " "), want)
+	}
+	want := []string{
+		"money-checks: two_active_subscriptions found 1 violation (9.99 USD) [error]",
+		"money-checks: two_active_subscriptions found 1 violation (5.00 EUR) in the last 1h [error]",
+		"money-checks: two_active_subscriptions no longer finds violations",
+	}
+	if strings.Join(n.msgs, "\n") != strings.Join(want, "\n") {
+		t.Errorf("messages:\n%s\nwant:\n%s", strings.Join(n.msgs, "\n"), strings.Join(want, "\n"))
+	}
+	has(t, scrape(t, s), `money_check_violations{check="two_active_subscriptions",scope="full",severity="error"} 0`)
 }

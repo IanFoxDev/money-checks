@@ -23,19 +23,29 @@ func Markdown(w io.Writer, r check.Report) error {
 	for _, w := range r.Warnings {
 		fmt.Fprintf(&b, "Warning: %s\n\n", w)
 	}
-	withKnown := false
+	withKnown, withWindow := false, false
 	for _, res := range r.Results {
 		withKnown = withKnown || res.Known > 0 || len(res.Resolved) > 0
+		withWindow = withWindow || res.Scope == check.Window
 	}
+	b.WriteString("| Check | Severity | Status | Violations | Amount |")
+	align := "|---|---|---|---:|---:|"
 	if withKnown {
-		b.WriteString("| Check | Severity | Status | Violations | Amount | Known |\n|---|---|---|---:|---:|---:|\n")
-	} else {
-		b.WriteString("| Check | Severity | Status | Violations | Amount |\n|---|---|---|---:|---:|\n")
+		b.WriteString(" Known |")
+		align += "---:|"
 	}
+	if withWindow {
+		b.WriteString(" Rows |")
+		align += "---|"
+	}
+	b.WriteString("\n" + align + "\n")
 	for _, res := range r.Results {
 		fmt.Fprintf(&b, "| %s | %s | %s | %s | %s |", cell(res.Name), res.Severity, res.Status, count(res), cell(totals(res.Totals)))
 		if withKnown {
 			fmt.Fprintf(&b, " %s |", knownCount(res))
+		}
+		if withWindow {
+			fmt.Fprintf(&b, " %s |", rows(res))
 		}
 		b.WriteString("\n")
 	}
@@ -51,10 +61,14 @@ func Markdown(w io.Writer, r check.Report) error {
 			fmt.Fprintf(&b, "Source `%s`. The check failed: %s\n", res.Source, res.Error)
 			continue
 		}
+		head := fmt.Sprintf("Source `%s`, severity %s", res.Source, res.Severity)
+		if res.Scope == check.Window {
+			head += fmt.Sprintf(", rows since %s (%s)", res.Since.Format("2006-01-02 15:04 UTC"), rows(res))
+		}
 		if res.Violations == 0 {
-			fmt.Fprintf(&b, "Source `%s`, severity %s. No new violations.\n", res.Source, res.Severity)
+			fmt.Fprintf(&b, "%s. No new violations.\n", head)
 		} else {
-			fmt.Fprintf(&b, "Source `%s`, severity %s. %s", res.Source, res.Severity, plural(res.Violations, "violation"))
+			fmt.Fprintf(&b, "%s. %s", head, plural(res.Violations, "violation"))
 			if len(res.Totals) > 0 {
 				fmt.Fprintf(&b, ", %s", totals(res.Totals))
 			}
@@ -118,6 +132,14 @@ func samples(b *strings.Builder, rows []check.Sample, total int64, extra string,
 	if n := int64(len(rows)); n < total {
 		fmt.Fprintf(b, "\nShowing %d of %d.\n", n, total)
 	}
+}
+
+// rows says which rows a check read: "last 24h" or "all".
+func rows(res check.Result) string {
+	if res.Scope == check.Window {
+		return "last " + check.Span(res.Window)
+	}
+	return "all"
 }
 
 func knownCount(res check.Result) string {
@@ -204,6 +226,10 @@ type jsonCheck struct {
 	Samples     []jsonSample `json:"samples"`
 	Error       string       `json:"error,omitempty"`
 	DurationMS  int64        `json:"duration_ms"`
+	// Scope is "window" when the check read the rows since Since only.
+	Scope  string     `json:"scope"`
+	Since  *time.Time `json:"since,omitempty"`
+	Window string     `json:"window,omitempty"`
 
 	Known        int64          `json:"known"`
 	KnownTotals  []jsonMoney    `json:"known_totals"`
@@ -246,9 +272,13 @@ func JSON(w io.Writer, r check.Report) error {
 		c := jsonCheck{
 			Name: res.Name, Description: strings.TrimSpace(res.Description), Source: res.Source,
 			Severity: res.Severity, Status: res.Status, Violations: res.Violations,
-			Error: res.Error, DurationMS: res.Duration.Milliseconds(),
+			Error: res.Error, DurationMS: res.Duration.Milliseconds(), Scope: string(res.Scope),
 			Totals: []jsonMoney{}, Samples: []jsonSample{},
 			Known: res.Known, KnownTotals: []jsonMoney{}, KnownSamples: []jsonSample{}, Resolved: []jsonResolved{},
+		}
+		if res.Scope == check.Window {
+			since := res.Since
+			c.Since, c.Window = &since, check.Span(res.Window)
 		}
 		for _, t := range res.Totals {
 			c.Totals = append(c.Totals, toJSONMoney(t))

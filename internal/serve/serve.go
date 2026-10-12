@@ -27,8 +27,18 @@ type Server struct {
 	notify  Notifier
 	metrics *metrics
 	reg     *prometheus.Registry
-	states  map[string]string // last status per check
-	ready   atomic.Bool
+	states  map[string]*state
+	// lastFull is when the last full run started; zero before the first.
+	lastFull time.Time
+	ready    atomic.Bool
+}
+
+// state is what the last runs of a check found, to tell what is news.
+type state struct {
+	failed bool
+	// found is per scope: a window run does not see what a full run found
+	// before the window, and must not report it as gone.
+	found map[check.Scope]bool
 }
 
 // New builds a server. notify may be nil, then state changes are only logged.
@@ -36,7 +46,7 @@ func New(cfg config.Config, open check.Opener, notify Notifier, log *slog.Logger
 	reg := prometheus.NewRegistry()
 	return &Server{
 		cfg: cfg, open: open, now: now, log: log, notify: notify,
-		metrics: newMetrics(reg), reg: reg, states: map[string]string{},
+		metrics: newMetrics(reg), reg: reg, states: map[string]*state{},
 	}
 }
 
@@ -59,22 +69,31 @@ func (s *Server) Handler() http.Handler {
 }
 
 // Cycle runs every check once, updates the metrics and notifies about changes.
+// The first run and then one every serve.full_every reads every row; the runs in
+// between read the window of the checks that have one.
 func (s *Server) Cycle(ctx context.Context) check.Report {
-	r := check.Run(ctx, s.cfg, s.open, s.now)
+	scope := check.Window
+	if start := s.now(); s.lastFull.IsZero() || start.Sub(s.lastFull) >= s.cfg.Serve.FullEvery {
+		scope, s.lastFull = check.Full, start
+	}
+	r := check.Run(ctx, s.cfg, scope, s.open, s.now)
 	for _, w := range r.Warnings {
 		s.log.Warn(w)
 	}
 	s.metrics.runs.Inc()
 	for _, res := range r.Results {
 		s.metrics.update(res, s.now())
-		prev, seen := s.states[res.Name]
-		s.states[res.Name] = res.Status
-		attrs := []any{"check", res.Name, "status", res.Status, "violations", res.Violations, "duration", res.Duration.String()}
+		st := s.states[res.Name]
+		if st == nil {
+			st = &state{found: map[check.Scope]bool{}}
+			s.states[res.Name] = st
+		}
+		attrs := []any{"check", res.Name, "scope", string(res.Scope), "status", res.Status, "violations", res.Violations, "duration", res.Duration.String()}
 		if res.Error != "" {
 			attrs = append(attrs, "error", res.Error)
 		}
 		s.log.Info("check finished", attrs...)
-		if msg := change(prev, seen, res); msg != "" {
+		if msg := st.change(res); msg != "" {
 			s.log.Info("state changed", "check", res.Name, "message", msg)
 			if s.notify != nil {
 				if err := s.notify.Notify(ctx, msg); err != nil {
@@ -120,27 +139,32 @@ func (s *Server) Run(ctx context.Context) error {
 	}
 }
 
-// change says what to post when a check's status differs from the last run.
-// The first run only reports problems; a check that is fine from the start is
-// not news.
-func change(prev string, seen bool, res check.Result) string {
-	if seen && prev == res.Status {
-		return ""
-	}
-	switch res.Status {
-	case check.StatusViolations:
-		return describe(res)
-	case check.StatusFailed:
-		return "money-checks: " + res.Name + " failed: " + res.Error
-	default:
-		if !seen {
+// change records res and says what to post about it, or "". The first run only
+// reports problems; a check that is fine from the start is not news. Violations
+// are news per scope. Only a full run says that they are gone: a row that leaves
+// the window is not fixed.
+func (st *state) change(res check.Result) string {
+	if res.Status == check.StatusFailed {
+		if st.failed {
 			return ""
 		}
-		if prev == check.StatusFailed {
-			return "money-checks: " + res.Name + " runs again and finds no violations"
-		}
+		st.failed = true
+		return "money-checks: " + res.Name + " failed: " + res.Error
+	}
+	wasFailed, had := st.failed, st.found[res.Scope]
+	found := res.Status == check.StatusViolations
+	st.failed, st.found[res.Scope] = false, found
+	switch {
+	case found && (!had || wasFailed):
+		return describe(res)
+	case found:
+		return ""
+	case wasFailed:
+		return "money-checks: " + res.Name + " runs again and finds no violations"
+	case had && res.Scope == check.Full:
 		return "money-checks: " + res.Name + " no longer finds violations"
 	}
+	return ""
 }
 
 func describe(res check.Result) string {
@@ -160,6 +184,9 @@ func describe(res check.Result) string {
 		if i == len(res.Totals)-1 {
 			msg += ")"
 		}
+	}
+	if res.Scope == check.Window {
+		msg += " in the last " + check.Span(res.Window)
 	}
 	return msg + " [" + res.Severity + "]"
 }

@@ -13,6 +13,7 @@ import (
 
 	"github.com/jackc/pgx/v5"
 
+	"github.com/ianfoxdev/money-checks/internal/config"
 	"github.com/ianfoxdev/money-checks/internal/source"
 )
 
@@ -186,4 +187,34 @@ func skipWithoutDB(t *testing.T, msg string) {
 		t.Fatal(msg)
 	}
 	t.Skip(msg)
+}
+
+// since records the start each query got.
+type since struct{ got []time.Time }
+
+func (s *since) Query(_ context.Context, _ config.Check, at time.Time, _ func(source.Row) error) error {
+	s.got = append(s.got, at)
+	return nil
+}
+
+func (*since) Close(context.Context) error { return nil }
+
+func TestRunWindow(t *testing.T) {
+	path := writeConfig(t, `
+version: 1
+sources: {ledger: {postgres: {dsn_env: MC_UNUSED}}}
+checks:
+  - {name: refunds, source: ledger, query: select $1, id: id, window: 24h}
+`)
+	src := &since{}
+	open := func(context.Context, string, config.Source, func(string)) (source.Source, error) { return src, nil }
+	for _, args := range [][]string{{"run", "-c", path}, {"run", "-c", path, "--window"}} {
+		var out, errOut bytes.Buffer
+		if code := run(context.Background(), args, &out, &errOut, open, fixed); code != exitOK {
+			t.Fatalf("%v: exit %d, %s", args, code, errOut.String())
+		}
+	}
+	if len(src.got) != 2 || !src.got[0].IsZero() || !src.got[1].Equal(fixed().Add(-24*time.Hour)) {
+		t.Errorf("since %v", src.got)
+	}
 }

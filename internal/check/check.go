@@ -23,6 +23,17 @@ const (
 	StatusFailed     = "failed"
 )
 
+// Scope says how much of the data a run reads.
+type Scope string
+
+const (
+	// Full reads every row. A check with a window gets the zero time as the start.
+	Full Scope = "full"
+	// Window reads the last window of every check that has one; the checks
+	// without a window read every row.
+	Window Scope = "window"
+)
+
 // Report is the outcome of one run.
 type Report struct {
 	StartedAt time.Time
@@ -43,12 +54,19 @@ type Result struct {
 	Error       string
 	Duration    time.Duration
 
+	// Scope is Window when the check read only the rows since Since, the
+	// start of its Window.
+	Scope  Scope
+	Since  time.Time
+	Window time.Duration
+
 	// Known violations: rows listed in the known file, with their reasons. They do
 	// not count towards Violations or the status.
 	Known        int64
 	KnownTotals  []Money
 	KnownSamples []Sample
-	// Resolved are entries of the known file the check no longer finds.
+	// Resolved are entries of the known file the check no longer finds. Only a
+	// full run can say that: a window run does not see older rows.
 	Resolved []Resolved
 }
 
@@ -96,7 +114,7 @@ type Opener func(ctx context.Context, name string, s config.Source, warn func(st
 // production database gets one query at a time. Each source is opened once, when
 // the first check that uses it runs. A source that cannot be opened fails its
 // checks; the other checks still run.
-func Run(ctx context.Context, cfg config.Config, open Opener, now func() time.Time) Report {
+func Run(ctx context.Context, cfg config.Config, scope Scope, open Opener, now func() time.Time) Report {
 	r := Report{StartedAt: now().UTC()}
 	warn := func(msg string) { r.Warnings = append(r.Warnings, msg) }
 	type opened struct {
@@ -119,7 +137,10 @@ func Run(ctx context.Context, cfg config.Config, open Opener, now func() time.Ti
 		}
 		start := now()
 		res := Result{
-			Name: ch.Name, Description: ch.Description, Source: ch.Source, Severity: ch.Severity,
+			Name: ch.Name, Description: ch.Description, Source: ch.Source, Severity: ch.Severity, Scope: Full,
+		}
+		if scope == Window && ch.Window > 0 {
+			res.Scope, res.Since, res.Window = Window, r.StartedAt.Add(-ch.Window), ch.Window
 		}
 		if o.err != nil {
 			res.Status, res.Error = StatusFailed, o.err.Error()
@@ -136,7 +157,7 @@ func runOne(ctx context.Context, cur money.Currencies, ch config.Check, known ma
 	totals, knownTotals := map[string]*Money{}, map[string]*Money{}
 	seen := map[string]bool{}
 	var rows int64
-	err := src.Query(ctx, ch, func(row source.Row) error {
+	err := src.Query(ctx, ch, res.Since, func(row source.Row) error {
 		rows++
 		id, ok := row.Get(ch.ID)
 		if !ok {
@@ -180,7 +201,7 @@ func runOne(ctx context.Context, cur money.Currencies, ch config.Check, known ma
 	}
 	res.Totals, res.KnownTotals = sorted(totals), sorted(knownTotals)
 	for id, k := range known {
-		if !seen[id] {
+		if !seen[id] && res.Scope == Full {
 			res.Resolved = append(res.Resolved, Resolved{ID: id, Reason: k.Reason})
 		}
 	}
@@ -281,6 +302,18 @@ func amount(cur money.Currencies, a config.Amount, row source.Row) (Money, error
 		return Money{}, fmt.Errorf("%s = %s: %w", a.Field, Display(v), err)
 	}
 	return Money{Currency: code, Minor: minor, Exponent: exp}, nil
+}
+
+// Span writes a window the way people say it: 24h, 90m, 168h.
+func Span(d time.Duration) string {
+	switch {
+	case d%time.Hour == 0:
+		return strconv.FormatInt(int64(d/time.Hour), 10) + "h"
+	case d%time.Minute == 0:
+		return strconv.FormatInt(int64(d/time.Minute), 10) + "m"
+	default:
+		return d.String()
+	}
 }
 
 // Display writes a row value for a report.

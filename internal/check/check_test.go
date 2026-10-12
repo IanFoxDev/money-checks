@@ -16,12 +16,17 @@ import (
 
 // fake returns the rows set for each check name, or the error.
 type fake struct {
+	since  map[string]time.Time // what each check got
 	rows   map[string][]source.Row
 	errs   map[string]error
 	closed bool
 }
 
-func (f *fake) Query(_ context.Context, ch config.Check, each func(source.Row) error) error {
+func (f *fake) Query(_ context.Context, ch config.Check, since time.Time, each func(source.Row) error) error {
+	if f.since == nil {
+		f.since = map[string]time.Time{}
+	}
+	f.since[ch.Name] = since
 	if err := f.errs[ch.Name]; err != nil {
 		return err
 	}
@@ -92,8 +97,13 @@ func clock() func() time.Time {
 
 func runFake(t *testing.T, c config.Config, f *fake) Report {
 	t.Helper()
+	return runScope(t, c, Full, f)
+}
+
+func runScope(t *testing.T, c config.Config, scope Scope, f *fake) Report {
+	t.Helper()
 	opens := map[string]int{}
-	r := Run(context.Background(), c, func(_ context.Context, name string, _ config.Source, warn func(string)) (source.Source, error) {
+	r := Run(context.Background(), c, scope, func(_ context.Context, name string, _ config.Source, warn func(string)) (source.Source, error) {
 		opens[name]++
 		if opens[name] > 1 {
 			t.Errorf("source %s opened %d times", name, opens[name])
@@ -317,5 +327,41 @@ func TestRunFailedResolvesNothing(t *testing.T) {
 	r := runFake(t, c, &fake{errs: map[string]error{"clean": errors.New("boom")}})
 	if res := r.Results[0]; res.Status != StatusFailed || len(res.Resolved) != 0 {
 		t.Errorf("got %+v", res)
+	}
+}
+
+// A window run gives a check with a window the start of its window and the
+// others the zero time; a full run gives every check the zero time. Only a full
+// run lists known entries as gone.
+func TestRunWindow(t *testing.T) {
+	yaml := strings.Replace(conf, "    samples: 2\n", "    samples: 2\n    window: 24h\n", 1)
+	c := load(t, strings.Replace(yaml, "query: q\n", "query: select $1\n", 1))
+	c.Checks = c.Checks[:2]
+	c.Known = map[string]map[string]config.Known{"rebills": {"s9": {ID: "s9", Reason: "fixed"}}}
+	f := &fake{}
+	r := runScope(t, c, Window, f)
+	reb, clean := r.Results[0], r.Results[1]
+	if reb.Scope != Window || reb.Window != 24*time.Hour || !reb.Since.Equal(r.StartedAt.Add(-24*time.Hour)) || !f.since["rebills"].Equal(reb.Since) {
+		t.Errorf("rebills: scope %s, window %s, since %s, the query got %s", reb.Scope, reb.Window, reb.Since, f.since["rebills"])
+	}
+	if len(reb.Resolved) != 0 {
+		t.Errorf("a window run resolved %+v", reb.Resolved)
+	}
+	if clean.Scope != Full || !f.since["clean"].IsZero() {
+		t.Errorf("clean: scope %s, the query got %s", clean.Scope, f.since["clean"])
+	}
+
+	f = &fake{}
+	r = runScope(t, c, Full, f)
+	if reb := r.Results[0]; reb.Scope != Full || !reb.Since.IsZero() || !f.since["rebills"].IsZero() || len(reb.Resolved) != 1 {
+		t.Errorf("full: %+v, the query got %s", reb, f.since["rebills"])
+	}
+}
+
+func TestSpan(t *testing.T) {
+	for d, want := range map[time.Duration]string{24 * time.Hour: "24h", 90 * time.Minute: "90m", 90 * time.Second: "1m30s"} {
+		if got := Span(d); got != want {
+			t.Errorf("Span(%s) = %q, want %q", d, got, want)
+		}
 	}
 }

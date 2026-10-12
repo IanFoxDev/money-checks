@@ -15,7 +15,7 @@ var update = flag.Bool("update", false, "rewrite the golden files")
 
 func sample() check.Report {
 	usd := func(minor int64) *check.Money { return &check.Money{Currency: "USD", Minor: minor, Exponent: 2} }
-	return check.Report{
+	r := check.Report{
 		StartedAt: time.Date(2026, 10, 8, 6, 0, 0, 0, time.UTC),
 		Warnings:  []string{"source billing: mongodb: the user can write to shop (insert); running anyway because require_read_only is false"},
 		Results: []check.Result{
@@ -34,6 +34,10 @@ func sample() check.Report {
 			{Name: "refund_twice", Source: "ledger", Severity: "error", Status: check.StatusFailed, Error: "source ledger: environment variable LEDGER_DSN is empty"},
 		},
 	}
+	for i := range r.Results {
+		r.Results[i].Scope = check.Full
+	}
+	return r
 }
 
 func golden(t *testing.T, name string, got []byte) {
@@ -101,6 +105,31 @@ func TestJSONKnown(t *testing.T) {
 		t.Fatal(err)
 	}
 	golden(t, "report_known.json", b.Bytes())
+}
+
+// withWindow is sample() from a window run: the first check has a window, the
+// others read every row.
+func withWindow() check.Report {
+	r := sample()
+	reb := &r.Results[0]
+	reb.Scope, reb.Window, reb.Since = check.Window, 24*time.Hour, r.StartedAt.Add(-24*time.Hour)
+	return r
+}
+
+func TestMarkdownWindow(t *testing.T) {
+	var b bytes.Buffer
+	if err := Markdown(&b, withWindow()); err != nil {
+		t.Fatal(err)
+	}
+	golden(t, "report_window.md", b.Bytes())
+}
+
+func TestJSONWindow(t *testing.T) {
+	var b bytes.Buffer
+	if err := JSON(&b, withWindow()); err != nil {
+		t.Fatal(err)
+	}
+	golden(t, "report_window.json", b.Bytes())
 }
 
 func TestJSONEmptyListsAreNotNull(t *testing.T) {

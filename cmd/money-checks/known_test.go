@@ -8,6 +8,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/ianfoxdev/money-checks/internal/check"
 	"github.com/ianfoxdev/money-checks/internal/config"
@@ -20,7 +21,7 @@ type rows struct {
 	err  error
 }
 
-func (s rows) Query(_ context.Context, _ config.Check, each func(source.Row) error) error {
+func (s rows) Query(_ context.Context, _ config.Check, _ time.Time, each func(source.Row) error) error {
 	for _, r := range s.rows {
 		if err := each(r); err != nil {
 			return err
@@ -127,7 +128,7 @@ func TestKnownAdd(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	r := check.Run(context.Background(), cfg, opener(src), fixed)
+	r := check.Run(context.Background(), cfg, check.Full, opener(src), fixed)
 	if res := r.Results[0]; res.Violations != 1 || res.Known != 4 || res.Samples[0].ID != "p1" {
 		t.Errorf("after: %+v", res)
 	}

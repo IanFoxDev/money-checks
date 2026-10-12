@@ -9,6 +9,7 @@ import (
 	"math"
 	"math/big"
 	"strings"
+	"time"
 
 	"github.com/ianfoxdev/money-checks/internal/config"
 	"github.com/ianfoxdev/money-checks/internal/money"
@@ -60,8 +61,9 @@ func (d Decimal) String() string {
 // Source runs checks against one database.
 type Source interface {
 	// Query runs the check and calls each for every row, in the order the database
-	// returns them. It stops at the first error each returns.
-	Query(ctx context.Context, ch config.Check, each func(Row) error) error
+	// returns them. It stops at the first error each returns. A check with a
+	// window gets since as its parameter; the zero time reads every row.
+	Query(ctx context.Context, ch config.Check, since time.Time, each func(Row) error) error
 	Close(ctx context.Context) error
 }
 

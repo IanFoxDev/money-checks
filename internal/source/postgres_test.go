@@ -73,7 +73,7 @@ func pgCheck(query string) config.Check {
 func collect(t *testing.T, src Source, ch config.Check) ([]Row, error) {
 	t.Helper()
 	var rows []Row
-	err := src.Query(context.Background(), ch, func(r Row) error {
+	err := src.Query(context.Background(), ch, time.Time{}, func(r Row) error {
 		rows = append(rows, r)
 		return nil
 	})
@@ -160,6 +160,41 @@ func TestPostgresRunsOneStatement(t *testing.T) {
 	}
 }
 
+// The start of the window is a bind parameter; PostgreSQL infers its type from
+// the column, timestamptz or timestamp (read as UTC). The zero time reads every row.
+func TestPostgresWindow(t *testing.T) {
+	pgSchema(t)
+	src := openPG(t)
+	for _, typ := range []string{"timestamptz", "timestamp"} {
+		ch := pgCheck(`select id from (values
+			('old', ` + typ + ` '2026-10-01 00:00:00'),
+			('new', ` + typ + ` '2026-10-08 05:00:00')
+		) v(id, at) where at >= $1 order by id`)
+		ch.Window = 24 * time.Hour
+		ids := func(since time.Time) string {
+			var got []string
+			err := src.Query(context.Background(), ch, since, func(r Row) error {
+				got = append(got, r.Values[0].(string))
+				return nil
+			})
+			if err != nil {
+				t.Fatalf("%s: %v", typ, err)
+			}
+			return strings.Join(got, ",")
+		}
+		if got := ids(time.Date(2026, 10, 7, 6, 0, 0, 0, time.UTC)); got != "new" {
+			t.Errorf("%s, window: %q", typ, got)
+		}
+		// The same instant in another zone.
+		if got := ids(time.Date(2026, 10, 8, 7, 30, 0, 0, time.FixedZone("CYT", 3*3600))); got != "new" {
+			t.Errorf("%s, window in +03: %q", typ, got)
+		}
+		if got := ids(time.Time{}); got != "new,old" {
+			t.Errorf("%s, full: %q", typ, got)
+		}
+	}
+}
+
 func TestPostgresTimeout(t *testing.T) {
 	pgSchema(t)
 	ch := pgCheck("select pg_sleep(5)")
@@ -177,7 +212,7 @@ func TestPostgresStopsOnCallbackError(t *testing.T) {
 	s := pgSchema(t)
 	stop := errors.New("stop")
 	n := 0
-	err := openPG(t).Query(context.Background(), pgCheck("select id from "+s+".payments"), func(Row) error {
+	err := openPG(t).Query(context.Background(), pgCheck("select id from "+s+".payments"), time.Time{}, func(Row) error {
 		n++
 		return stop
 	})

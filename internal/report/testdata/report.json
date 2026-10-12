@@ -57,6 +57,7 @@
         }
       ],
       "duration_ms": 120,
+      "scope": "full",
       "known": 0,
       "known_totals": [],
       "known_samples": [],
@@ -71,6 +72,7 @@
       "totals": [],
       "samples": [],
       "duration_ms": 40,
+      "scope": "full",
       "known": 0,
       "known_totals": [],
       "known_samples": [],
@@ -89,6 +91,7 @@
         }
       ],
       "duration_ms": 0,
+      "scope": "full",
       "known": 0,
       "known_totals": [],
       "known_samples": [],
@@ -104,6 +107,7 @@
       "samples": [],
       "error": "source ledger: environment variable LEDGER_DSN is empty",
       "duration_ms": 0,
+      "scope": "full",
       "known": 0,
       "known_totals": [],
       "known_samples": [],

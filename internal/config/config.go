@@ -90,6 +90,9 @@ type Check struct {
 	Mask    []string      `yaml:"mask"`
 	Samples *int          `yaml:"samples"`
 	Timeout time.Duration `yaml:"timeout"`
+	// Window, when set, lets a run read only the rows of the last Window: the
+	// query gets the start of the window as $1 (postgres) or $$since (mongodb).
+	Window time.Duration `yaml:"window"`
 }
 
 // Amount says which column holds the money of a violation and in what unit.
@@ -103,8 +106,11 @@ type Amount struct {
 // Serve configures the long-running mode.
 type Serve struct {
 	Interval time.Duration `yaml:"interval"`
-	Listen   string        `yaml:"listen"`
-	Slack    *Slack        `yaml:"slack"`
+	// FullEvery is how often serve reads every row of the checks with a window;
+	// the runs in between read the window only.
+	FullEvery time.Duration `yaml:"full_every"`
+	Listen    string        `yaml:"listen"`
+	Slack     *Slack        `yaml:"slack"`
 }
 
 // Slack posts when a check starts or stops finding violations, or fails.
@@ -114,11 +120,12 @@ type Slack struct {
 
 // Defaults when neither the check nor the defaults section sets a value.
 const (
-	DefaultTimeout  = 30 * time.Second
-	DefaultSamples  = 10
-	DefaultInterval = 10 * time.Minute
-	DefaultListen   = ":8080"
-	MaxSamples      = 1000
+	DefaultTimeout   = 30 * time.Second
+	DefaultSamples   = 10
+	DefaultInterval  = 10 * time.Minute
+	DefaultFullEvery = 24 * time.Hour
+	DefaultListen    = ":8080"
+	MaxSamples       = 1000
 )
 
 // Load reads and checks a configuration file. pipeline_file and query_file are
@@ -233,6 +240,9 @@ func (c *Config) applyDefaults() {
 	if c.Serve.Interval == 0 {
 		c.Serve.Interval = DefaultInterval
 	}
+	if c.Serve.FullEvery == 0 {
+		c.Serve.FullEvery = DefaultFullEvery
+	}
 	if c.Serve.Listen == "" {
 		c.Serve.Listen = DefaultListen
 	}
@@ -278,6 +288,9 @@ func (c *Config) check() []error {
 	if c.Serve.Interval < time.Minute {
 		errs = append(errs, fmt.Errorf("serve.interval: at least 1m, got %s", c.Serve.Interval))
 	}
+	if c.Serve.FullEvery < c.Serve.Interval {
+		errs = append(errs, fmt.Errorf("serve.full_every: at least serve.interval (%s), got %s", c.Serve.Interval, c.Serve.FullEvery))
+	}
 	if c.Serve.Slack != nil && c.Serve.Slack.WebhookEnv == "" {
 		errs = append(errs, errors.New("serve.slack.webhook_env: the name of the environment variable with the webhook URL"))
 	}
@@ -319,6 +332,13 @@ func (c *Config) checkCheck(where string, ch Check) []error {
 	if ch.Timeout < 0 {
 		add("timeout: must be positive")
 	}
+	switch {
+	case ch.Window < 0:
+		add("window: must be positive")
+	case ch.Window > 0 && ch.Window < c.Serve.Interval:
+		// Rows written between two runs would be missed until the next full pass.
+		add("window: at least serve.interval (%s), got %s", c.Serve.Interval, ch.Window)
+	}
 	if n := *ch.Samples; n < 0 || n > MaxSamples {
 		add("samples: want 0..%d, got %d", MaxSamples, n)
 	}
@@ -338,6 +358,12 @@ func (c *Config) checkCheck(where string, ch Check) []error {
 		for _, err := range checkPipeline(&ch.Pipeline) {
 			add("pipeline: %w", err)
 		}
+		switch since := hasValue(&ch.Pipeline, "$$since"); {
+		case ch.Window > 0 && !since:
+			add("window: the pipeline must compare a time field with $$since, the start of the window, inside $expr")
+		case ch.Window == 0 && since:
+			add("pipeline: $$since is the start of the window; set window")
+		}
 	case src.Postgres != nil:
 		if ch.Collection != "" || ch.Pipeline.Kind != 0 {
 			add("collection and pipeline are for mongodb sources; %s is postgres, use query", ch.Source)
@@ -347,6 +373,9 @@ func (c *Config) checkCheck(where string, ch Check) []error {
 		}
 		if ch.ID == "" {
 			add("id: the column that identifies a violating row")
+		}
+		if ch.Window > 0 && !strings.Contains(ch.Query, "$1") {
+			add("window: the query must compare a time column with $1, the start of the window")
 		}
 	}
 	if a := ch.Amount; a != nil {
@@ -401,6 +430,19 @@ func checkPipeline(n *yaml.Node) []error {
 		}
 	})
 	return errs
+}
+
+// hasValue says whether a scalar in the tree is v.
+func hasValue(n *yaml.Node, v string) bool {
+	if n.Kind == yaml.ScalarNode {
+		return n.Value == v
+	}
+	for _, child := range n.Content {
+		if hasValue(child, v) {
+			return true
+		}
+	}
+	return false
 }
 
 // walk calls f for every mapping key in the tree.

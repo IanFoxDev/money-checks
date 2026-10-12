@@ -101,7 +101,7 @@ func knownAdd(ctx context.Context, args []string, stdout, stderr io.Writer, open
 	one := *ch
 	one.Samples = &n
 	cfg.Checks = []config.Check{one}
-	r := check.Run(ctx, cfg, open, now)
+	r := check.Run(ctx, cfg, check.Full, open, now)
 	for _, w := range r.Warnings {
 		fmt.Fprintln(stderr, "warning:", w)
 	}

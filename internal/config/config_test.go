@@ -189,3 +189,62 @@ func TestGetenv(t *testing.T) {
 		t.Errorf("Getenv = %q, %v", v, err)
 	}
 }
+
+func TestParseWindow(t *testing.T) {
+	ok := `
+version: 1
+sources:
+  billing: {mongodb: {uri_env: A, database: shop}}
+  ledger: {postgres: {dsn_env: B}}
+checks:
+  - name: rebills
+    source: billing
+    collection: payments
+    window: 48h
+    pipeline:
+      - $match: {$expr: {$gte: ["$paid_at", "$$since"]}}
+  - name: refunds
+    source: ledger
+    query: select id from refunds where created_at >= $1
+    id: id
+    window: 24h
+serve: {interval: 1h}
+`
+	c, err := Parse([]byte(ok), ".")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if c.Checks[0].Window != 48*time.Hour || c.Serve.FullEvery != 24*time.Hour {
+		t.Errorf("window %s, full_every %s", c.Checks[0].Window, c.Serve.FullEvery)
+	}
+
+	bad := `
+version: 1
+sources:
+  billing: {mongodb: {uri_env: A, database: shop}}
+  ledger: {postgres: {dsn_env: B}}
+checks:
+  - {name: no_since, source: billing, collection: c, window: 24h, pipeline: [{$match: {a: 1}}]}
+  - {name: no_window, source: billing, collection: c, pipeline: [{$match: {$expr: {$gte: ["$at", "$$since"]}}}]}
+  - {name: no_param, source: ledger, query: select 1, id: id, window: 24h}
+  - {name: short, source: ledger, query: select $1, id: id, window: 30m}
+  - {name: negative, source: ledger, query: select $1, id: id, window: -1h}
+serve: {interval: 1h, full_every: 30m}
+`
+	_, err = Parse([]byte(bad), ".")
+	if err == nil {
+		t.Fatal("no error")
+	}
+	for _, want := range []string{
+		"check no_since: window: the pipeline must compare a time field with $$since",
+		"check no_window: pipeline: $$since is the start of the window; set window",
+		"check no_param: window: the query must compare a time column with $1",
+		"check short: window: at least serve.interval (1h0m0s), got 30m0s",
+		"check negative: window: must be positive",
+		"serve.full_every: at least serve.interval (1h0m0s), got 30m0s",
+	} {
+		if !strings.Contains(err.Error(), want) {
+			t.Errorf("missing %q in:\n%v", want, err)
+		}
+	}
+}

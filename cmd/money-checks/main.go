@@ -30,8 +30,9 @@ const (
 )
 
 const usage = `usage:
-  money-checks run -c checks.yaml [--markdown file] [--json file]
-      run every check once; the Markdown report goes to stdout unless a file is given
+  money-checks run -c checks.yaml [--window] [--markdown file] [--json file]
+      run every check once; the Markdown report goes to stdout unless a file is given;
+      with --window, checks that have a window read only its rows
   money-checks serve -c checks.yaml
       run the checks now and every serve.interval; /metrics, /healthz, /readyz on serve.listen
   money-checks known add -c checks.yaml --check NAME --reason TEXT [--until DATE] [--limit N]
@@ -78,6 +79,7 @@ func runChecks(ctx context.Context, args []string, stdout, stderr io.Writer, ope
 	path := fs.String("c", "checks.yaml", "configuration file")
 	mdPath := fs.String("markdown", "", "write the Markdown report to this file instead of stdout")
 	jsonPath := fs.String("json", "", "also write the JSON report to this file")
+	window := fs.Bool("window", false, "checks with a window read only the rows of the window")
 	if err := fs.Parse(args); err != nil {
 		return exitError
 	}
@@ -86,7 +88,11 @@ func runChecks(ctx context.Context, args []string, stdout, stderr io.Writer, ope
 		fmt.Fprintln(stderr, err)
 		return exitError
 	}
-	r := check.Run(ctx, cfg, open, now)
+	scope := check.Full
+	if *window {
+		scope = check.Window
+	}
+	r := check.Run(ctx, cfg, scope, open, now)
 	for _, w := range r.Warnings {
 		fmt.Fprintln(stderr, "warning:", w)
 	}

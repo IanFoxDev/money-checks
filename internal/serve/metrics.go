@@ -27,23 +27,23 @@ func newMetrics(reg prometheus.Registerer) *metrics {
 		}),
 		violations: prometheus.NewGaugeVec(prometheus.GaugeOpts{
 			Name: "money_check_violations", Help: "Rows the check returned on its last successful run, not counting known violations.",
-		}, []string{"check", "severity"}),
+		}, []string{"check", "severity", "scope"}),
 		known: prometheus.NewGaugeVec(prometheus.GaugeOpts{
 			Name: "money_check_known_violations", Help: "Rows of the last successful run that the known file accepts.",
-		}, []string{"check"}),
+		}, []string{"check", "scope"}),
 		// Minor units are integers; a float64 holds them exactly up to 2^53.
 		amount: prometheus.NewGaugeVec(prometheus.GaugeOpts{
 			Name: "money_check_amount_minor_units", Help: "Total amount of the violations in minor units of the currency, last successful run.",
-		}, []string{"check", "currency"}),
+		}, []string{"check", "currency", "scope"}),
 		up: prometheus.NewGaugeVec(prometheus.GaugeOpts{
 			Name: "money_check_up", Help: "1 if the check's last run finished, 0 if it failed.",
 		}, []string{"check"}),
 		lastSuccess: prometheus.NewGaugeVec(prometheus.GaugeOpts{
 			Name: "money_check_last_success_timestamp_seconds", Help: "When the check last finished a run.",
-		}, []string{"check"}),
+		}, []string{"check", "scope"}),
 		duration: prometheus.NewGaugeVec(prometheus.GaugeOpts{
 			Name: "money_check_duration_seconds", Help: "How long the check's last run took.",
-		}, []string{"check"}),
+		}, []string{"check", "scope"}),
 		errors: prometheus.NewCounterVec(prometheus.CounterOpts{
 			Name: "money_check_errors_total", Help: "Runs of the check that failed.",
 		}, []string{"check"}),
@@ -54,9 +54,11 @@ func newMetrics(reg prometheus.Registerer) *metrics {
 
 // update keeps the last good numbers when a run fails: up drops to 0 and the
 // violation gauges still say what was last known, which is what an alert on
-// "violations > 0" should keep seeing.
+// "violations > 0" should keep seeing. The gauges of what was found carry the
+// scope, so a window run does not overwrite what the last full run found.
 func (m *metrics) update(res check.Result, now time.Time) {
-	m.duration.WithLabelValues(res.Name).Set(res.Duration.Seconds())
+	scope := string(res.Scope)
+	m.duration.WithLabelValues(res.Name, scope).Set(res.Duration.Seconds())
 	if res.Status == check.StatusFailed {
 		m.up.WithLabelValues(res.Name).Set(0)
 		m.errors.WithLabelValues(res.Name).Inc()
@@ -64,13 +66,13 @@ func (m *metrics) update(res check.Result, now time.Time) {
 	}
 	m.errors.WithLabelValues(res.Name).Add(0)
 	m.up.WithLabelValues(res.Name).Set(1)
-	m.lastSuccess.WithLabelValues(res.Name).Set(float64(now.Unix()))
-	m.violations.WithLabelValues(res.Name, res.Severity).Set(float64(res.Violations))
-	m.known.WithLabelValues(res.Name).Set(float64(res.Known))
+	m.lastSuccess.WithLabelValues(res.Name, scope).Set(float64(now.Unix()))
+	m.violations.WithLabelValues(res.Name, res.Severity, scope).Set(float64(res.Violations))
+	m.known.WithLabelValues(res.Name, scope).Set(float64(res.Known))
 	// A currency that is gone from the totals must not keep its old value.
-	m.amount.DeletePartialMatch(prometheus.Labels{"check": res.Name})
+	m.amount.DeletePartialMatch(prometheus.Labels{"check": res.Name, "scope": scope})
 	for _, t := range res.Totals {
-		m.amount.WithLabelValues(res.Name, t.Currency).Set(float64(t.Minor))
+		m.amount.WithLabelValues(res.Name, t.Currency, scope).Set(float64(t.Minor))
 	}
 }
 

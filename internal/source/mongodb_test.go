@@ -314,3 +314,48 @@ func TestMongoDBSendsMaxTimeMSAndReadPreference(t *testing.T) {
 		t.Errorf("comment = %q", c)
 	}
 }
+
+// The start of the window is the variable $$since; the zero time reads every
+// document.
+func TestMongoDBWindow(t *testing.T) {
+	db, admin, reader := mongoDB(t)
+	ctx := context.Background()
+	client, err := mongo.Connect(options.Client().ApplyURI(admin))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = client.Disconnect(ctx) }()
+	_, err = client.Database(db).Collection("renewals").InsertMany(ctx, []any{
+		bson.D{{Key: "_id", Value: "old"}, {Key: "paid_at", Value: bson.NewDateTimeFromTime(time.Date(2026, 10, 1, 0, 0, 0, 0, time.UTC))}},
+		bson.D{{Key: "_id", Value: "new"}, {Key: "paid_at", Value: bson.NewDateTimeFromTime(time.Date(2026, 10, 8, 5, 0, 0, 0, time.UTC))}},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	src, _, err := openMongo(t, db, reader, true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	ch := mongoCheck(t, `
+- $match: {$expr: {$gte: ["$paid_at", "$$since"]}}
+- $sort: {_id: 1}
+`)
+	ch.Collection, ch.Window = "renewals", 24*time.Hour
+	ids := func(since time.Time) string {
+		var got []string
+		err := src.Query(ctx, ch, since, func(r Row) error {
+			got = append(got, r.Values[0].(string))
+			return nil
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
+		return strings.Join(got, ",")
+	}
+	if got := ids(time.Date(2026, 10, 7, 6, 0, 0, 0, time.UTC)); got != "new" {
+		t.Errorf("window: %q", got)
+	}
+	if got := ids(time.Time{}); got != "new,old" {
+		t.Errorf("full: %q", got)
+	}
+}
