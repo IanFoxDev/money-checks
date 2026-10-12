@@ -89,18 +89,21 @@ against a staging copy.
 
 | Metric | Labels | |
 |---|---|---|
-| `money_check_violations` | `check`, `severity` | rows the check returned on its last successful run, not counting known violations |
-| `money_check_known_violations` | `check` | rows the known file accepts |
-| `money_check_amount_minor_units` | `check`, `currency` | total of those rows in minor units (cents for USD) |
+| `money_check_violations` | `check`, `severity`, `scope` | rows the check returned on its last successful run, not counting known violations |
+| `money_check_known_violations` | `check`, `scope` | rows the known file accepts |
+| `money_check_amount_minor_units` | `check`, `currency`, `scope` | total of those rows in minor units (cents for USD) |
 | `money_check_up` | `check` | 1 if the last run finished, 0 if it failed |
-| `money_check_last_success_timestamp_seconds` | `check` | when the check last finished |
-| `money_check_duration_seconds` | `check` | how long the last run took |
+| `money_check_last_success_timestamp_seconds` | `check`, `scope` | when the check last finished |
+| `money_check_duration_seconds` | `check`, `scope` | how long the last run took |
 | `money_check_errors_total` | `check` | runs that failed |
 | `money_checks_runs_total` | | runs of all checks |
 
 When a run fails, `money_check_up` drops to 0 and the violation gauges keep the last
 known values, so an alert on violations does not clear itself because the database
-was unreachable. An alert rule to start from:
+was unreachable. `scope` is `full` for a run that read every row and `window` for
+one that read only the last `window` of a check (below); the two series are kept
+apart, so a window run does not hide what the last full run found. An alert rule to
+start from:
 
 ```yaml
 groups:
@@ -112,7 +115,7 @@ groups:
         annotations:
           summary: "{{ $labels.check }}: {{ $value }} violations"
       - alert: MoneyCheckNotRunning
-        expr: time() - money_check_last_success_timestamp_seconds > 3600
+        expr: time() - max by (check) (money_check_last_success_timestamp_seconds) > 3600
         annotations:
           summary: "{{ $labels.check }} has not finished a run for an hour"
 ```
@@ -120,6 +123,29 @@ groups:
 With `serve.slack.webhook_env` set, a message goes to Slack when a check changes
 state: it starts finding violations, stops finding them, fails or recovers. Not on
 every run. Messages carry the check name, the count and the totals, never rows.
+
+## Read the last day, not the whole table
+
+A check that scans every payment every ten minutes costs the database the same
+whether anything changed or not. With `window: 24h` the query gets the start of the
+window as a parameter, `$1` in SQL and `$$since` in a pipeline, and `serve` reads only
+the last day between full passes (`serve.full_every`, 24h by default):
+
+```yaml
+  - name: refund_twice
+    source: ledger
+    window: 24h
+    query: |
+      select payment_id, sum(amount) as amount, currency
+      from refunds
+      where payment_id in (select payment_id from refunds where created_at >= $1)
+      group by payment_id, currency
+      having count(*) > 1
+```
+
+The window picks the payments that changed; the invariant is checked over all their
+refunds. `where created_at >= $1` alone would miss a payment refunded once last month
+and once today. The column needs an index. Details: `docs/config.md`.
 
 ## Known violations
 

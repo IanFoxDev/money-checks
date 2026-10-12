@@ -72,6 +72,7 @@ A list. Checks run in this order, one at a time.
 | `mask` | | columns of `show` to mask |
 | `samples` | | rows shown in the report; overrides `defaults.samples` |
 | `timeout` | | overrides `defaults.timeout` |
+| `window` | | `24h`: `serve` and `run --window` read only the rows since then, below |
 
 Every row the query returns is a violation. Write the query so that a correct
 database returns nothing.
@@ -127,11 +128,55 @@ row and the value. Sums of doubles almost always need `$round` in the pipeline.
 
 The currency code is upper-cased and must be in ISO 4217 or under `currencies`.
 
+### window
+
+A full pass over a large table every ten minutes reads rows that have not changed for
+years. With `window`, the query gets the start of the window as a parameter and
+reads only recent rows; a full pass still runs every `serve.full_every`.
+
+```yaml
+  - name: refund_twice
+    source: ledger
+    window: 24h
+    query: |
+      select payment_id, sum(amount) as amount, currency
+      from refunds
+      where payment_id in (select payment_id from refunds where created_at >= $1)
+      group by payment_id, currency
+      having count(*) > 1
+```
+
+On PostgreSQL the start is `$1`, a bind parameter of the type of the column it is
+compared with (`timestamptz` or `timestamp`, in UTC). On MongoDB it is the variable
+`$$since`, which works inside `$expr` (MongoDB 5.0 and later):
+
+```yaml
+    pipeline:
+      - $match: {$expr: {$gte: ["$paid_at", "$$since"]}}
+```
+
+Nothing is put into the text of the query. On a full pass the start is
+`0001-01-01T00:00:00Z`, so the same query reads every row. A check with `window`
+must use the parameter, and a pipeline that uses `$$since` must have a `window`.
+`window` is at least `serve.interval`, or rows written between two runs would wait
+for the next full pass. Hours are the largest unit: a week is `168h`.
+
+Mind invariants that span time. "Two refunds of one payment" with `where created_at
+>= $1` alone misses a payment refunded once last month and once today: only today's
+refund is in the window, so the group has one row. The query above uses the window
+to pick the payments that changed and checks the invariant over all their rows. The
+column of the window needs an index; money-checks does not create one.
+
+A row that leaves the window is not fixed. Only a full pass says that violations
+are gone: the metrics keep one series per `scope`, and the Slack message that a check
+no longer finds violations comes from a full pass only.
+
 ## serve
 
 ```yaml
 serve:
   interval: 10m            # default 10m, at least 1m
+  full_every: 24h          # default 24h, at least interval: a full pass of checks with a window
   listen: ":8080"          # default :8080
   slack:
     webhook_env: SLACK_WEBHOOK_URL
@@ -141,6 +186,10 @@ Each run opens the sources again, so a database that restarts between runs does 
 need money-checks to restart. With `slack`, a message is posted when a check starts
 finding violations, stops finding them, fails or runs again after failing. The first
 run posts only about checks that are not clean.
+
+The first run and then one every `full_every` read every row; the runs in between
+read the window of the checks that have one. A window run posts new violations
+("found 1 violation (5.00 EUR) in the last 24h"), not that they are gone.
 
 ## known_file
 
@@ -179,14 +228,15 @@ entries for you after a first run, see below.
 ## Command line
 
 ```
-money-checks run -c checks.yaml [--markdown file] [--json file]
+money-checks run -c checks.yaml [--window] [--markdown file] [--json file]
 money-checks serve -c checks.yaml
 money-checks known add -c checks.yaml --check NAME --reason TEXT [--until DATE] [--limit N]
 money-checks version
 ```
 
 `run` writes the Markdown report to stdout unless `--markdown` names a file, and the
-JSON report when `--json` is given. Warnings and the errors of failed checks go to
+JSON report when `--json` is given. With `--window`, checks that have a `window` read
+only its rows; without it, `run` reads every row. Warnings and the errors of failed checks go to
 stderr. `serve` logs JSON to stderr and stops on SIGINT or SIGTERM.
 
 `known add` runs one check and appends every new violation it finds to the known
@@ -219,6 +269,9 @@ an error.
         {"id": "...", "amount": {"currency": "USD", "minor": 999, "amount": "9.99"}, "fields": {"n": "2"}}
       ],
       "duration_ms": 12,
+      "scope": "window",
+      "since": "2026-10-07T06:00:00Z",
+      "window": "24h",
       "known": 1,
       "known_totals": [{"currency": "USD", "minor": 2699, "amount": "26.99"}],
       "known_samples": [
@@ -235,4 +288,6 @@ given twice, as integer minor units and as a decimal string, never as a JSON num
 with a fraction. Lists are never null. `violations`, `totals` and `samples` are about
 new violations; `known*` are the rows the known file accepts, and `resolved` lists
 its entries the check no longer finds. A sample that is in the known file but counts
-again has a `note` that says why.
+again has a `note` that says why. `scope` is `full` when the check read every row and
+`window` when it read the rows since `since`; then `resolved` is empty, because a
+window run does not see older rows.
