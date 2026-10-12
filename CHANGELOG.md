@@ -8,6 +8,12 @@ configuration, the report format or the metric names; such changes are marked
 
 ## [Unreleased]
 
+## [0.2.0] - 2026-10-12
+
+For the first run against a real database: rows that were looked at and accepted
+go into a known file with a reason, and the alert is about new violations only. A
+check can read the last day instead of the whole table, with a full pass once a day.
+
 ### Added
 
 - `known_file`: violations that were looked at and accepted, each with a required
@@ -16,6 +22,8 @@ configuration, the report format or the metric names; such changes are marked
   lists them with their reasons and lists entries the check no longer finds. See
   `docs/adr/0002-known-violations.md`.
 - The metric `money_check_known_violations{check}`.
+- The JSON report has `known`, `known_totals`, `known_samples` and `resolved` for
+  every check, and a `note` on samples that are in the known file but count again.
 - `money-checks known add`: runs one check and appends its new violations to the
   known file, with a reason, the amounts and an optional `until`.
 - `window` on a check: the query gets the start of the window as a bind parameter
@@ -23,15 +31,12 @@ configuration, the report format or the metric names; such changes are marked
   reads every row at start and every `serve.full_every` (24h), the window in
   between; `run --window` reads the window once. The JSON report has `scope`,
   `since` and `window` for every check.
-- The JSON report has `known`, `known_totals`, `known_samples` and `resolved` for
-  every check, and a `note` on samples that are in the known file but count again.
 
 ### Changed
 
 - **BREAKING** The gauges of what a check found, its last success and its duration
   have a `scope` label, `full` or `window`. Selectors keep working; a query that
   sums over checks should group by `scope` or take the `max`.
-
 - **BREAKING** An ObjectId, a date or a decimal inside a document or an array (a
   compound `_id` from `$group`) is written as hex, RFC 3339 or a decimal string, as at
   the top level: `{"user":"652f..."}` instead of `{"user":{"$oid":"652f..."}}`. Ids in
@@ -63,5 +68,6 @@ CI, with the database tests required to run.
 - `show` and `mask` for the columns a report may contain.
 - Docker image and the example in `examples/subscriptions`.
 
-[Unreleased]: https://github.com/IanFoxDev/money-checks/compare/v0.1.0...HEAD
+[Unreleased]: https://github.com/IanFoxDev/money-checks/compare/v0.2.0...HEAD
+[0.2.0]: https://github.com/IanFoxDev/money-checks/compare/v0.1.0...v0.2.0
 [0.1.0]: https://github.com/IanFoxDev/money-checks/releases/tag/v0.1.0
