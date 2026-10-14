@@ -19,6 +19,10 @@ sources:
   ledger:
     postgres:
       dsn_env: LEDGER_DSN
+  stats:
+    clickhouse:
+      url_env: STATS_CLICKHOUSE_URL
+      database: stats
 checks:
   - name: two_rebills_in_one_period
     description: A subscription was charged twice for the same period.
@@ -45,6 +49,11 @@ checks:
     id: payment_id
     amount: {field: amount, unit: minor, currency_field: currency}
     timeout: 5s
+  - name: shares_match_pool
+    source: stats
+    query: select period, pool - paid as amount from payouts where pool != paid
+    id: period
+    amount: {field: amount, unit: major, currency: EUR}
 serve:
   slack: {webhook_env: SLACK_WEBHOOK_URL}
 `
@@ -54,7 +63,7 @@ func TestParseValid(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(c.Checks) != 3 {
+	if len(c.Checks) != 4 {
 		t.Fatalf("%d checks", len(c.Checks))
 	}
 	rebills, active, refunds := c.Checks[0], c.Checks[1], c.Checks[2]
@@ -70,8 +79,11 @@ func TestParseValid(t *testing.T) {
 	if !strings.Contains(refunds.Query, "having count(*) > 1") || refunds.Timeout != 5*time.Second {
 		t.Errorf("query_file not read: %+v", refunds)
 	}
-	if !*c.Sources["billing"].MongoDB.RequireReadOnly {
+	if !*c.Sources["billing"].MongoDB.RequireReadOnly || !*c.Sources["stats"].ClickHouse.RequireReadOnly {
 		t.Error("require_read_only should default to true")
+	}
+	if k := c.Sources["stats"].Kind(); k != "clickhouse" {
+		t.Errorf("kind %q", k)
 	}
 	if c.Serve.Interval != DefaultInterval || c.Serve.Listen != DefaultListen {
 		t.Errorf("serve defaults: %+v", c.Serve)
@@ -100,6 +112,13 @@ sources:
     mongodb: {database: x}
   pg:
     postgres: {}
+  three:
+    mongodb: {uri_env: A, database: x}
+    postgres: {dsn_env: B}
+    clickhouse: {url_env: C, database: y}
+  none: {}
+  ch:
+    clickhouse: {}
 checks:
   - name: Bad-Name
     source: nouri
@@ -124,6 +143,10 @@ checks:
     query: select 1
     id: id
     amount: {field: amount, currency: USD, currency_field: cur}
+  - name: ch_pipeline
+    source: ch
+    collection: c
+    pipeline: [{$match: {a: 1}}]
 serve: {interval: 10s, slack: {}}
 `
 	_, err := Parse([]byte(bad), "testdata")
@@ -133,7 +156,12 @@ serve: {interval: 10s, slack: {}}
 	for _, want := range []string{
 		"version: want 1",
 		"defaults.samples",
-		"sources.both: set mongodb or postgres, not both",
+		"sources.both: set one of mongodb, postgres and clickhouse, not several",
+		"sources.three: set one of mongodb, postgres and clickhouse, not several",
+		"sources.none: set mongodb, postgres or clickhouse",
+		"sources.ch.clickhouse.url_env",
+		"sources.ch.clickhouse.database: required",
+		"check ch_pipeline: collection and pipeline are for mongodb sources; ch is clickhouse, use query",
 		"sources.nouri.mongodb.uri_env",
 		"sources.pg.postgres.dsn_env",
 		"name must match",
@@ -141,14 +169,14 @@ serve: {interval: 10s, slack: {}}
 		"$merge writes to the database",
 		"$out writes to the database",
 		"stage 1 (line",
-		"query is for postgres sources",
+		"query is for postgres and clickhouse sources",
 		"check dup: the name is used twice",
 		"set query or query_file",
 		"id: the column",
 		"amount.unit: want minor or major",
 		"amount.currency: unknown \"ZZZ\"",
 		"mask: \"email\" is not in show",
-		"source: unknown \"missing\", known: both, nouri, pg",
+		"source: unknown \"missing\", known: both, ch, none, nouri, pg, three",
 		"amount: set currency or currency_field",
 		"serve.interval: at least 1m",
 		"serve.slack.webhook_env",
@@ -196,6 +224,7 @@ version: 1
 sources:
   billing: {mongodb: {uri_env: A, database: shop}}
   ledger: {postgres: {dsn_env: B}}
+  stats: {clickhouse: {url_env: C, database: stats}}
 checks:
   - name: rebills
     source: billing
@@ -206,6 +235,11 @@ checks:
   - name: refunds
     source: ledger
     query: select id from refunds where created_at >= $1
+    id: id
+    window: 24h
+  - name: daily
+    source: stats
+    query: "select day as id from daily where day >= { since : DateTime64(6, 'UTC') }"
     id: id
     window: 24h
 serve: {interval: 1h}
@@ -223,7 +257,10 @@ version: 1
 sources:
   billing: {mongodb: {uri_env: A, database: shop}}
   ledger: {postgres: {dsn_env: B}}
+  stats: {clickhouse: {url_env: C, database: stats}}
 checks:
+  - {name: ch_no_since, source: stats, query: select 1 as id, id: id, window: 24h}
+  - {name: ch_no_window, source: stats, query: "select 1 as id where now() > {since:DateTime64(6, 'UTC')}", id: id}
   - {name: no_since, source: billing, collection: c, window: 24h, pipeline: [{$match: {a: 1}}]}
   - {name: no_window, source: billing, collection: c, pipeline: [{$match: {$expr: {$gte: ["$at", "$$since"]}}}]}
   - {name: no_param, source: ledger, query: select 1, id: id, window: 24h}
@@ -239,6 +276,8 @@ serve: {interval: 1h, full_every: 30m}
 		"check no_since: window: the pipeline must compare a time field with $$since",
 		"check no_window: pipeline: $$since is the start of the window; set window",
 		"check no_param: window: the query must compare a time column with $1",
+		"check ch_no_since: window: the query must compare a time column with {since:DateTime64(6, 'UTC')}",
+		"check ch_no_window: query: {since:...} is the start of the window; set window",
 		"check short: window: at least serve.interval (1h0m0s), got 30m0s",
 		"check negative: window: must be positive",
 		"serve.full_every: at least serve.interval (1h0m0s), got 30m0s",

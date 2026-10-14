@@ -84,8 +84,10 @@ func Open(ctx context.Context, name string, s config.Source, warn func(string)) 
 			return nil, fmt.Errorf("source %s: %w", name, err)
 		}
 		return src, nil
+	case s.ClickHouse != nil:
+		return nil, fmt.Errorf("source %s: clickhouse is not supported yet", name)
 	default:
-		return nil, fmt.Errorf("source %s: set mongodb or postgres", name)
+		return nil, fmt.Errorf("source %s: set mongodb, postgres or clickhouse", name)
 	}
 }
 

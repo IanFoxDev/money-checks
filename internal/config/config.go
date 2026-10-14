@@ -43,16 +43,21 @@ type Defaults struct {
 // Source is one database. Connection strings come from environment variables,
 // never from the file.
 type Source struct {
-	MongoDB  *MongoDB  `yaml:"mongodb"`
-	Postgres *Postgres `yaml:"postgres"`
+	MongoDB    *MongoDB    `yaml:"mongodb"`
+	Postgres   *Postgres   `yaml:"postgres"`
+	ClickHouse *ClickHouse `yaml:"clickhouse"`
 }
 
-// Kind is "mongodb" or "postgres".
+// Kind is "mongodb", "postgres" or "clickhouse".
 func (s Source) Kind() string {
-	if s.MongoDB != nil {
+	switch {
+	case s.MongoDB != nil:
 		return "mongodb"
+	case s.ClickHouse != nil:
+		return "clickhouse"
+	default:
+		return "postgres"
 	}
-	return "postgres"
 }
 
 // MongoDB reads with aggregation pipelines. The read preference comes from the URI.
@@ -68,6 +73,15 @@ type Postgres struct {
 	DSNEnv string `yaml:"dsn_env"`
 }
 
+// ClickHouse is read over HTTP with readonly set on every query; see
+// docs/adr/0003-clickhouse.md.
+type ClickHouse struct {
+	URLEnv   string `yaml:"url_env"`
+	Database string `yaml:"database"`
+	// RequireReadOnly stops the run when the user has a grant that writes. Default true.
+	RequireReadOnly *bool `yaml:"require_read_only"`
+}
+
 // Check is one invariant: a query that returns the rows that break it.
 type Check struct {
 	Name        string `yaml:"name"`
@@ -80,7 +94,7 @@ type Check struct {
 	Pipeline     yaml.Node `yaml:"pipeline"`
 	PipelineFile string    `yaml:"pipeline_file"`
 
-	// PostgreSQL.
+	// PostgreSQL and ClickHouse.
 	Query     string `yaml:"query"`
 	QueryFile string `yaml:"query_file"`
 
@@ -91,7 +105,8 @@ type Check struct {
 	Samples *int          `yaml:"samples"`
 	Timeout time.Duration `yaml:"timeout"`
 	// Window, when set, lets a run read only the rows of the last Window: the
-	// query gets the start of the window as $1 (postgres) or $$since (mongodb).
+	// query gets the start of the window as $1 (postgres), $$since (mongodb) or
+	// {since:DateTime64(6, 'UTC')} (clickhouse).
 	Window time.Duration `yaml:"window"`
 }
 
@@ -215,11 +230,14 @@ func (c *Config) applyDefaults() {
 		n := DefaultSamples
 		c.Defaults.Samples = &n
 	}
-	for name, s := range c.Sources {
+	for _, s := range c.Sources {
 		if s.MongoDB != nil && s.MongoDB.RequireReadOnly == nil {
 			yes := true
 			s.MongoDB.RequireReadOnly = &yes
-			c.Sources[name] = s
+		}
+		if s.ClickHouse != nil && s.ClickHouse.RequireReadOnly == nil {
+			yes := true
+			s.ClickHouse.RequireReadOnly = &yes
 		}
 	}
 	for i := range c.Checks {
@@ -299,11 +317,26 @@ func (c *Config) check() []error {
 
 func (s Source) check(name string) []error {
 	where := "sources." + name
+	set := 0
+	for _, p := range []bool{s.MongoDB != nil, s.Postgres != nil, s.ClickHouse != nil} {
+		if p {
+			set++
+		}
+	}
 	switch {
-	case s.MongoDB == nil && s.Postgres == nil:
-		return []error{fmt.Errorf("%s: set mongodb or postgres", where)}
-	case s.MongoDB != nil && s.Postgres != nil:
-		return []error{fmt.Errorf("%s: set mongodb or postgres, not both", where)}
+	case set == 0:
+		return []error{fmt.Errorf("%s: set mongodb, postgres or clickhouse", where)}
+	case set > 1:
+		return []error{fmt.Errorf("%s: set one of mongodb, postgres and clickhouse, not several", where)}
+	case s.ClickHouse != nil:
+		var errs []error
+		if s.ClickHouse.URLEnv == "" {
+			errs = append(errs, fmt.Errorf("%s.clickhouse.url_env: the name of the environment variable with the HTTP URL", where))
+		}
+		if s.ClickHouse.Database == "" {
+			errs = append(errs, fmt.Errorf("%s.clickhouse.database: required", where))
+		}
+		return errs
 	case s.MongoDB != nil:
 		var errs []error
 		if s.MongoDB.URIEnv == "" {
@@ -350,7 +383,7 @@ func (c *Config) checkCheck(where string, ch Check) []error {
 		add("source: unknown %q, known: %s", ch.Source, strings.Join(sortedKeys(c.Sources), ", "))
 	case src.MongoDB != nil:
 		if ch.Query != "" {
-			add("query is for postgres sources; %s is mongodb, use collection and pipeline", ch.Source)
+			add("query is for postgres and clickhouse sources; %s is mongodb, use collection and pipeline", ch.Source)
 		}
 		if ch.Collection == "" {
 			add("collection: required for a mongodb source")
@@ -364,9 +397,9 @@ func (c *Config) checkCheck(where string, ch Check) []error {
 		case ch.Window == 0 && since:
 			add("pipeline: $$since is the start of the window; set window")
 		}
-	case src.Postgres != nil:
+	default:
 		if ch.Collection != "" || ch.Pipeline.Kind != 0 {
-			add("collection and pipeline are for mongodb sources; %s is postgres, use query", ch.Source)
+			add("collection and pipeline are for mongodb sources; %s is %s, use query", ch.Source, src.Kind())
 		}
 		if strings.TrimSpace(ch.Query) == "" {
 			add("set query or query_file")
@@ -374,8 +407,13 @@ func (c *Config) checkCheck(where string, ch Check) []error {
 		if ch.ID == "" {
 			add("id: the column that identifies a violating row")
 		}
-		if ch.Window > 0 && !strings.Contains(ch.Query, "$1") {
+		switch since := clickhouseSince.MatchString(ch.Query); {
+		case src.Postgres != nil && ch.Window > 0 && !strings.Contains(ch.Query, "$1"):
 			add("window: the query must compare a time column with $1, the start of the window")
+		case src.ClickHouse != nil && ch.Window > 0 && !since:
+			add("window: the query must compare a time column with {since:DateTime64(6, 'UTC')}, the start of the window")
+		case src.ClickHouse != nil && ch.Window == 0 && since:
+			add("query: {since:...} is the start of the window; set window")
 		}
 	}
 	if a := ch.Amount; a != nil {
@@ -405,6 +443,9 @@ func (c *Config) checkCheck(where string, ch Check) []error {
 	}
 	return errs
 }
+
+// clickhouseSince finds the window parameter in a ClickHouse query.
+var clickhouseSince = regexp.MustCompile(`\{\s*since\s*:`)
 
 // writeStages change data. A check must never run them.
 var writeStages = map[string]bool{"$out": true, "$merge": true}
