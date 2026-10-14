@@ -4,7 +4,8 @@
 [![examples](https://github.com/IanFoxDev/money-checks/actions/workflows/examples.yml/badge.svg)](https://github.com/IanFoxDev/money-checks/actions/workflows/examples.yml)
 
 Money invariants as code. A check is a query against your own database, a MongoDB
-aggregation pipeline or SQL for PostgreSQL, that returns the rows breaking a rule:
+aggregation pipeline or SQL for PostgreSQL or ClickHouse, that returns the rows
+breaking a rule:
 a subscription charged twice for one month, a user with two active subscriptions,
 refunds larger than the payment, a ledger transaction that does not sum to zero.
 money-checks runs the checks, adds up what they found per currency and tells you,
@@ -190,8 +191,8 @@ Amounts are `int64` minor units with the ISO 4217 exponent of their currency, fr
 the database to the report. Nothing is held in a float and nothing is rounded.
 
 - Integers are minor units (`unit: minor`) or whole major units (`unit: major`).
-- Decimal strings, MongoDB `Decimal128` and PostgreSQL `numeric` are parsed digit by
-  digit: `10.99` USD is 1099, `1200` JPY is 1200.
+- Decimal strings, MongoDB `Decimal128`, PostgreSQL `numeric` and ClickHouse
+  `Decimal` are parsed digit by digit: `10.99` USD is 1099, `1200` JPY is 1200.
 - A MongoDB double, which is how PHP and JavaScript code often stores prices, is read
   through its shortest decimal form: `10.1` is 1010 cents. A double that is not a
   whole number of minor units fails the check with the row and the value.
@@ -221,6 +222,11 @@ enough.
   accepts the risk and prints a warning on every run. Each pipeline is sent with
   `maxTimeMS`, so the server stops the work when the check times out, and with the
   read preference from the URI, so checks can read from a secondary.
+- **ClickHouse**: every query is sent with `readonly=2`, which the query cannot turn
+  off, and with `max_execution_time`. At start money-checks checks the user's grants
+  with `CHECK GRANT` and stops if the user can insert, alter, truncate, drop or create
+  tables in the database, with the same `require_read_only: false` escape. The
+  server never runs two statements in one request.
 
 Connection strings and the Slack webhook come from environment variables named in the
 file, never from the file itself. Why it is built this way:
@@ -244,7 +250,7 @@ The full configuration: [docs/config.md](docs/config.md).
 
 ## Not yet
 
-ClickHouse and MySQL sources, checks that compare two sources (the day's payments in
+MySQL sources, checks that compare two sources (the day's payments in
 one database against the day's revenue in another), a history of violations, and an
 MCP mode so an assistant can run the same named queries. If you need one of these
 first, open an issue.

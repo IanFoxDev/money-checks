@@ -34,13 +34,15 @@ typed values that would have to be turned back into what a check needs.
 
 **HTTP, with the standard library.** The source is a URL in an environment variable
 (`url_env`), like `dsn_env` for PostgreSQL, and the database is named in the
-configuration. Every query is a POST with `default_format=TabSeparatedWithNamesAndTypes`.
+configuration. Every query is a POST with `default_format=TabSeparatedWithNames`.
 In that format every value arrives as text, with no setting needed to get there, so it
 works for a `readonly=1` user too: `Decimal`, `Int64` and `UInt64` are parsed digit by
 digit, as `numeric` is on PostgreSQL. Nothing passes through a float that was not a
 float in the table. A query with its own `FORMAT` clause is answered in that format;
 the response header `X-ClickHouse-Format` shows it, and the check fails with an error
-that says to remove the clause.
+that says to remove the clause. Every query also has `wait_end_of_query=1`: without
+it, an error after the first rows comes as HTTP 200 with the message after the rows,
+and with it the answer is a 500.
 
 **The read-only guarantee is a setting money-checks puts on every query.** On start
 the source reads `getSetting('readonly')` for its user.
@@ -48,15 +50,19 @@ the source reads `getSetting('readonly')` for its user.
 - `0` or `2`: every query is sent with `readonly=2`, `max_execution_time` equal to
   the check's timeout, and `cancel_http_readonly_queries_on_client_close=1`. These
   replace any value with the same name in the URL.
-- `1`: the profile already forbids writes. Queries are sent with no settings, the
-  timeout is only on the client side, and the source warns once that the server
-  keeps running a query after the client gave up. The fix is `max_execution_time`
-  in the user's profile.
+- `1`: the profile already forbids writes. Queries are sent with `readonly=1`, the
+  only value of a setting such a user may send, so the timeout is only on the client
+  side, and the source warns once that the server keeps running a query after the
+  client gave up. The fix is `max_execution_time` in the user's profile.
 
-**The user's grants are checked once, as for MongoDB.** When `readonly` is not `1`,
-the source runs `CHECK GRANT` for INSERT, ALTER, CREATE, DROP, TRUNCATE and OPTIMIZE
-on the configured database. `CHECK GRANT` sees grants that come through roles. If
-any of them is granted, the run stops, unless the source sets
+**The user's grants are checked once, as for MongoDB.** When the user's `readonly`
+is `0`, the source runs `CHECK GRANT` on the configured database for INSERT, ALTER
+UPDATE, ALTER DELETE, ALTER DROP COLUMN, ALTER MODIFY COLUMN, ALTER MOVE PARTITION,
+TRUNCATE, DROP TABLE, CREATE TABLE and OPTIMIZE. The parts of ALTER are checked one by
+one because `CHECK GRANT ALTER` is 0 for a user who has only ALTER DELETE. These
+statements are sent without `readonly`, since under it `CHECK GRANT` answers 0 for
+everything. `CHECK GRANT` sees grants that come through roles. If any of them is
+granted, the run stops, unless the source sets
 `require_read_only: false`, in which case it warns on every run. The setting on each
 query is what stops writes. The grant check tells the owner of the configuration
 that the credentials are wider than they need to be.
@@ -65,14 +71,13 @@ that the credentials are wider than they need to be.
 `{since:DateTime64(6, 'UTC')}` and the start of the window goes in `param_since`. It
 is never put into the query text.
 
-**Values.** The second header line gives each column's type. Integers that fit
-`int64` become one, larger ones (`UInt64`, `Int128`) stay strings, decimals become a
-`Decimal`. Floats are `float64` and go through the same rule as MongoDB doubles: an
-amount that does not fit the currency is an error for the check, never rounded. A
-`DateTime` is printed in the column's time zone, or the server's
-(`X-ClickHouse-Timezone`) when the column has none, and becomes RFC 3339 in UTC.
-`\N` in a `Nullable` column is nil. Arrays, maps and tuples stay as ClickHouse
-prints them.
+**Values stay text, as on PostgreSQL.** `\N` is nil, everything else is the string
+ClickHouse printed, with the TabSeparated escapes undone. An amount is parsed from that
+text with the currency's exponent, so `Decimal`, `UInt64` and `Int128` are exact, and a
+`Float64` is read in the shortest form ClickHouse prints: an amount that does not fit
+the currency is an error for the check, never rounded. Dates and times are printed in
+the column's time zone, or the server's when the column has none, as they would be by
+`clickhouse-client`.
 
 ## Consequences
 

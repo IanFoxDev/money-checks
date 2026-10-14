@@ -8,6 +8,15 @@ configuration, the report format or the metric names; such changes are marked
 
 ## [Unreleased]
 
+### Added
+
+- ClickHouse sources (`clickhouse` with `url_env` and `database`), read over HTTP.
+  Every check is sent with `readonly=2` and `max_execution_time`; at start the
+  user's grants are checked with `CHECK GRANT`, and a user that can write stops the
+  run unless `require_read_only: false`. A user whose profile sets `readonly=1` is
+  accepted with a warning about the timeout. Values come back as text. See
+  `docs/adr/0003-clickhouse.md`.
+
 ## [0.2.0] - 2026-10-12
 
 For the first run against a real database: rows that were looked at and accepted

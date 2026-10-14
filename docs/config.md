@@ -31,9 +31,14 @@ sources:
   ledger:
     postgres:
       dsn_env: LEDGER_PG_DSN       # the environment variable with the DSN
+  stats:
+    clickhouse:
+      url_env: STATS_CLICKHOUSE_URL  # the environment variable with the HTTP URL
+      database: stats
+      require_read_only: true        # default true
 ```
 
-The URI and the DSN are read from the environment when the source is opened, so the
+The URI, the DSN and the URL are read from the environment when the source is opened, so the
 file can be committed. An empty variable fails the checks of that source with its
 name in the message; checks on other sources still run.
 
@@ -51,6 +56,29 @@ the extended protocol whatever the DSN says. Values come back as text, so `numer
 and `float8` are never read through a float. A role with `SELECT` on the tables the
 checks read is enough.
 
+**clickhouse.** The HTTP interface, `http://` or `https://`, port 8123 or 8443:
+`https://checks:secret@host:8443/`. The user and the password may also be the `user`
+and `password` parameters of the URL; other parameters are passed to the server as
+they are. Every check is sent with `readonly=2` and `max_execution_time` set to the
+check's timeout; these replace the same parameters in the URL. At start money-checks
+reads the user's own `readonly` setting:
+
+- `0`: it checks the user's grants on the database with `CHECK GRANT`, roles
+  included, and stops if the user has INSERT, ALTER UPDATE, ALTER DELETE, ALTER DROP
+  COLUMN, ALTER MODIFY COLUMN, ALTER MOVE PARTITION, TRUNCATE, DROP TABLE, CREATE
+  TABLE or OPTIMIZE. With `require_read_only: false` it runs anyway and prints a
+  warning on every run.
+- `1`, set by a settings profile: writes are already impossible, and so is sending
+  any setting, the timeout included. The checks run with the timeout on the client
+  side only, and money-checks warns that a query keeps running on the server after
+  the check gives up, unless the profile sets `max_execution_time`.
+
+Values come back as text, so `Decimal`, `UInt64` and `Float64` are read like
+`numeric` on PostgreSQL. A query must not have a `FORMAT` clause. Give the user
+`SELECT` on one database and nothing else: table functions such as `url()` and
+`remote()` only read, but they reach other servers, and only grants keep them out.
+Why ClickHouse is read this way: `docs/adr/0003-clickhouse.md`.
+
 ## checks
 
 A list. Checks run in this order, one at a time.
@@ -64,9 +92,9 @@ A list. Checks run in this order, one at a time.
 | `collection` | mongodb | the collection the pipeline runs on |
 | `pipeline` | mongodb | a list of stages, or `pipeline_file` |
 | `pipeline_file` | mongodb | a JSON or YAML file with the stages, relative to the config file |
-| `query` | postgres | one SQL statement, or `query_file` |
-| `query_file` | postgres | a file with the statement, relative to the config file |
-| `id` | | the column that identifies a row; default `_id` for mongodb, required for postgres |
+| `query` | postgres, clickhouse | one SQL statement, or `query_file` |
+| `query_file` | postgres, clickhouse | a file with the statement, relative to the config file |
+| `id` | | the column that identifies a row; default `_id` for mongodb, required for postgres and clickhouse |
 | `amount` | | where the money of a row is, below; without it the check only counts rows |
 | `show` | | columns shown next to the id in the report |
 | `mask` | | columns of `show` to mask |
