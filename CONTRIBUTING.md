@@ -5,16 +5,18 @@
 You need Go 1.26 or later and Docker.
 
 ```bash
-make postgres-up mongo-up   # PostgreSQL on 55434, MongoDB with authentication on 55435
-make check                  # go vet, go test -race, golangci-lint (in Docker)
-make postgres-down mongo-down
+make postgres-up mongo-up clickhouse-up  # PostgreSQL on 55434, MongoDB with authentication on 55435, ClickHouse HTTP on 55436
+make check                               # go vet, go test -race, golangci-lint (in Docker)
+make postgres-down mongo-down clickhouse-down
 ```
 
 Without the databases the source and end-to-end tests are skipped, not failed, so
 check the output if a run looks fast (`go test -v ./... | grep SKIP`). The Makefile
-sets `MONEY_CHECKS_TEST_PG_DSN` and `MONEY_CHECKS_TEST_MONGO_URI` for the containers
-above. The MongoDB tests need authentication on, because they check that a user who
-can write is refused.
+sets `MONEY_CHECKS_TEST_PG_DSN`, `MONEY_CHECKS_TEST_MONGO_URI` and
+`MONEY_CHECKS_TEST_CLICKHOUSE_URL` for the containers above. The MongoDB tests need
+authentication on, because they check that a user who can write is refused. The
+ClickHouse tests create users and roles, so the ClickHouse user needs access
+management (`CLICKHOUSE_DEFAULT_ACCESS_MANAGEMENT=1`).
 
 ```bash
 go test ./internal/report -update                 # rewrite the golden reports after an intended change
