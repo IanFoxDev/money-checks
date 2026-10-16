@@ -108,6 +108,56 @@ type Check struct {
 	// query gets the start of the window as $1 (postgres), $$since (mongodb) or
 	// {since:DateTime64(6, 'UTC')} (clickhouse).
 	Window time.Duration `yaml:"window"`
+
+	// Compare, when set, replaces source, the query and id: the check reads
+	// totals from two sides and reports the keys where they differ.
+	Compare *Compare `yaml:"compare"`
+}
+
+// Compare reads one row per key from each side and reports the keys where the
+// sides differ; see docs/adr/0004-compare.md.
+type Compare struct {
+	Left  Side     `yaml:"left"`
+	Right Side     `yaml:"right"`
+	Key   []string `yaml:"key"`
+	// Amount is read the same way on both sides.
+	Amount *Amount `yaml:"amount"`
+	// Counts are integer columns that must be equal on both sides.
+	Counts []string `yaml:"counts"`
+	// ToleranceMinor is the difference of the amount, in minor units, that is
+	// not a violation.
+	ToleranceMinor int64 `yaml:"tolerance_minor"`
+	// MaxRows is the most rows a side may return; more is an error of the check.
+	MaxRows int `yaml:"max_rows"`
+}
+
+// Side is one side of a compare check: a query or a pipeline against a source.
+type Side struct {
+	Source       string    `yaml:"source"`
+	Collection   string    `yaml:"collection"`
+	Pipeline     yaml.Node `yaml:"pipeline"`
+	PipelineFile string    `yaml:"pipeline_file"`
+	Query        string    `yaml:"query"`
+	QueryFile    string    `yaml:"query_file"`
+}
+
+// Side is the check a source runs for one side of a compare check: its query,
+// with the timeout and the window of ch. name is "left" or "right".
+func (ch Check) Side(name string) Check {
+	s := ch.Compare.Left
+	if name == "right" {
+		s = ch.Compare.Right
+	}
+	return Check{
+		Name: ch.Name + " " + name, Source: s.Source, Severity: ch.Severity,
+		Collection: s.Collection, Pipeline: s.Pipeline, Query: s.Query,
+		Timeout: ch.Timeout, Window: ch.Window, Samples: ch.Samples,
+	}
+}
+
+// HasAmount says whether the violations of the check have an amount.
+func (ch Check) HasAmount() bool {
+	return ch.Amount != nil || ch.Compare != nil && ch.Compare.Amount != nil
 }
 
 // Amount says which column holds the money of a violation and in what unit.
@@ -141,6 +191,7 @@ const (
 	DefaultFullEvery = 24 * time.Hour
 	DefaultListen    = ":8080"
 	MaxSamples       = 1000
+	DefaultMaxRows   = 100000
 )
 
 // Load reads and checks a configuration file. pipeline_file and query_file are
@@ -186,40 +237,53 @@ func (c *Config) readFiles(dir string) []error {
 	var errs []error
 	for i := range c.Checks {
 		ch := &c.Checks[i]
-		if ch.QueryFile != "" && ch.Query != "" {
-			errs = append(errs, fmt.Errorf("check %s: set query or query_file, not both", ch.Name))
-			continue
+		if err := readFiles(dir, &ch.Query, ch.QueryFile, &ch.Pipeline, ch.PipelineFile); err != nil {
+			errs = append(errs, fmt.Errorf("check %s: %w", ch.Name, err))
 		}
-		if ch.PipelineFile != "" && ch.Pipeline.Kind != 0 {
-			errs = append(errs, fmt.Errorf("check %s: set pipeline or pipeline_file, not both", ch.Name))
-			continue
-		}
-		if ch.QueryFile != "" {
-			b, err := os.ReadFile(filepath.Join(dir, ch.QueryFile))
-			if err != nil {
-				errs = append(errs, fmt.Errorf("check %s: query_file: %w", ch.Name, err))
-				continue
-			}
-			ch.Query = string(b)
-		}
-		if ch.PipelineFile != "" {
-			b, err := os.ReadFile(filepath.Join(dir, ch.PipelineFile))
-			if err != nil {
-				errs = append(errs, fmt.Errorf("check %s: pipeline_file: %w", ch.Name, err))
-				continue
-			}
-			// JSON is YAML, so one decoder reads both.
-			var doc yaml.Node
-			if err := yaml.Unmarshal(b, &doc); err != nil {
-				errs = append(errs, fmt.Errorf("check %s: pipeline_file %s: %w", ch.Name, ch.PipelineFile, err))
-				continue
-			}
-			if doc.Kind == yaml.DocumentNode && len(doc.Content) == 1 {
-				ch.Pipeline = *doc.Content[0]
+		if cmp := ch.Compare; cmp != nil {
+			for _, side := range []struct {
+				name string
+				s    *Side
+			}{{"left", &cmp.Left}, {"right", &cmp.Right}} {
+				if err := readFiles(dir, &side.s.Query, side.s.QueryFile, &side.s.Pipeline, side.s.PipelineFile); err != nil {
+					errs = append(errs, fmt.Errorf("check %s: compare.%s: %w", ch.Name, side.name, err))
+				}
 			}
 		}
 	}
 	return errs
+}
+
+// readFiles reads query_file into query and pipeline_file into pipeline.
+func readFiles(dir string, query *string, queryFile string, pipeline *yaml.Node, pipelineFile string) error {
+	if queryFile != "" && *query != "" {
+		return errors.New("set query or query_file, not both")
+	}
+	if pipelineFile != "" && pipeline.Kind != 0 {
+		return errors.New("set pipeline or pipeline_file, not both")
+	}
+	if queryFile != "" {
+		b, err := os.ReadFile(filepath.Join(dir, queryFile))
+		if err != nil {
+			return fmt.Errorf("query_file: %w", err)
+		}
+		*query = string(b)
+	}
+	if pipelineFile != "" {
+		b, err := os.ReadFile(filepath.Join(dir, pipelineFile))
+		if err != nil {
+			return fmt.Errorf("pipeline_file: %w", err)
+		}
+		// JSON is YAML, so one decoder reads both.
+		var doc yaml.Node
+		if err := yaml.Unmarshal(b, &doc); err != nil {
+			return fmt.Errorf("pipeline_file %s: %w", pipelineFile, err)
+		}
+		if doc.Kind == yaml.DocumentNode && len(doc.Content) == 1 {
+			*pipeline = *doc.Content[0]
+		}
+	}
+	return nil
 }
 
 func (c *Config) applyDefaults() {
@@ -253,6 +317,9 @@ func (c *Config) applyDefaults() {
 		}
 		if s, ok := c.Sources[ch.Source]; ok && s.MongoDB != nil && ch.ID == "" {
 			ch.ID = "_id"
+		}
+		if ch.Compare != nil && ch.Compare.MaxRows == 0 {
+			ch.Compare.MaxRows = DefaultMaxRows
 		}
 	}
 	if c.Serve.Interval == 0 {
@@ -375,6 +442,28 @@ func (c *Config) checkCheck(where string, ch Check) []error {
 	if n := *ch.Samples; n < 0 || n > MaxSamples {
 		add("samples: want 0..%d, got %d", MaxSamples, n)
 	}
+	if ch.Compare != nil {
+		return append(errs, c.checkCompare(where, ch)...)
+	}
+	c.checkQuery(ch, true, add)
+	if a := ch.Amount; a != nil {
+		c.checkAmount(*a, add)
+	}
+	show := map[string]bool{}
+	for _, f := range ch.Show {
+		show[f] = true
+	}
+	for _, f := range ch.Mask {
+		if !show[f] {
+			add("mask: %q is not in show; only shown columns can be masked", f)
+		}
+	}
+	return errs
+}
+
+// checkQuery checks the source and the query or pipeline of a check or of a side
+// of a compare check. needID is false for a side, which has a key instead.
+func (c *Config) checkQuery(ch Check, needID bool, add func(string, ...any)) {
 	src, ok := c.Sources[ch.Source]
 	switch {
 	case ch.Source == "":
@@ -404,7 +493,7 @@ func (c *Config) checkCheck(where string, ch Check) []error {
 		if strings.TrimSpace(ch.Query) == "" {
 			add("set query or query_file")
 		}
-		if ch.ID == "" {
+		if needID && ch.ID == "" {
 			add("id: the column that identifies a violating row")
 		}
 		switch since := clickhouseSince.MatchString(ch.Query); {
@@ -423,30 +512,87 @@ func (c *Config) checkCheck(where string, ch Check) []error {
 			}
 		}
 	}
-	if a := ch.Amount; a != nil {
-		if a.Field == "" {
-			add("amount.field: required")
+}
+
+func (c *Config) checkAmount(a Amount, add func(string, ...any)) {
+	if a.Field == "" {
+		add("amount.field: required")
+	}
+	if a.Unit != "minor" && a.Unit != "major" {
+		add("amount.unit: want minor or major, got %q", a.Unit)
+	}
+	switch {
+	case (a.Currency == "") == (a.CurrencyField == ""):
+		add("amount: set currency or currency_field")
+	case a.Currency != "":
+		if _, ok := c.Money.Exponent(a.Currency); !ok {
+			add("amount.currency: unknown %q; add it under currencies with its number of decimal places", a.Currency)
 		}
-		if a.Unit != "minor" && a.Unit != "major" {
-			add("amount.unit: want minor or major, got %q", a.Unit)
+	}
+}
+
+// checkCompare checks a compare check. Its sides take the place of source, the
+// query and id; its rows are totals, so show and mask do not apply.
+func (c *Config) checkCompare(where string, ch Check) []error {
+	var errs []error
+	add := func(format string, a ...any) {
+		errs = append(errs, fmt.Errorf(where+": "+format, a...))
+	}
+	cmp := ch.Compare
+	for _, f := range []struct {
+		name string
+		set  bool
+	}{
+		{"source", ch.Source != ""}, {"collection", ch.Collection != ""}, {"pipeline", ch.Pipeline.Kind != 0},
+		{"query", ch.Query != ""}, {"id", ch.ID != ""}, {"amount", ch.Amount != nil},
+		{"show", len(ch.Show) > 0}, {"mask", len(ch.Mask) > 0},
+	} {
+		if f.set {
+			add("%s: a compare check sets it under compare or on each side, not on the check", f.name)
 		}
+	}
+	for _, name := range []string{"left", "right"} {
+		side := ch.Side(name)
+		c.checkQuery(side, false, func(format string, a ...any) {
+			add("compare."+name+": "+format, a...)
+		})
+	}
+	key := map[string]bool{}
+	if len(cmp.Key) == 0 {
+		add("compare.key: the columns both sides group by, such as [day, currency]")
+	}
+	for _, k := range cmp.Key {
+		if key[k] {
+			add("compare.key: %q is listed twice", k)
+		}
+		key[k] = true
+	}
+	if a := cmp.Amount; a != nil {
+		c.checkAmount(*a, func(format string, args ...any) { add("compare."+format, args...) })
+		if a.CurrencyField != "" && !key[a.CurrencyField] {
+			add("compare.amount.currency_field: %q must be in key, so both amounts of a key are in one currency", a.CurrencyField)
+		}
+		if key[a.Field] {
+			add("compare.amount.field: %q is in key", a.Field)
+		}
+	}
+	counts := map[string]bool{}
+	for _, n := range cmp.Counts {
 		switch {
-		case (a.Currency == "") == (a.CurrencyField == ""):
-			add("amount: set currency or currency_field")
-		case a.Currency != "":
-			if _, ok := c.Money.Exponent(a.Currency); !ok {
-				add("amount.currency: unknown %q; add it under currencies with its number of decimal places", a.Currency)
-			}
+		case key[n]:
+			add("compare.counts: %q is in key", n)
+		case counts[n]:
+			add("compare.counts: %q is listed twice", n)
+		case cmp.Amount != nil && n == cmp.Amount.Field:
+			add("compare.counts: %q is the amount", n)
 		}
+		counts[n] = true
 	}
-	show := map[string]bool{}
-	for _, f := range ch.Show {
-		show[f] = true
+	if cmp.ToleranceMinor < 0 {
+		add("compare.tolerance_minor: must be 0 or more")
 	}
-	for _, f := range ch.Mask {
-		if !show[f] {
-			add("mask: %q is not in show; only shown columns can be masked", f)
-		}
+	if cmp.MaxRows < 0 {
+		add("compare.max_rows: must be positive")
 	}
 	return errs
 }

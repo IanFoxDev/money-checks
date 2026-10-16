@@ -291,3 +291,112 @@ serve: {interval: 1h, full_every: 30m}
 		}
 	}
 }
+
+func TestParseCompare(t *testing.T) {
+	ok := `
+version: 1
+sources:
+  billing: {mongodb: {uri_env: A, database: shop}}
+  stats: {clickhouse: {url_env: C, database: stats}}
+checks:
+  - name: purchases_reach_stats
+    window: 72h
+    compare:
+      left:
+        source: billing
+        collection: purchases
+        pipeline:
+          - $match: {$expr: {$gte: ["$paid_at", "$$since"]}}
+      right:
+        source: stats
+        query: "select toString(day) as day, currency, sum(amount) as amount, count() as n from daily where day >= toDate({since:DateTime64(6, 'UTC')}) group by day, currency"
+      key: [day, currency]
+      amount: {field: amount, unit: major, currency_field: currency}
+      counts: [n]
+      tolerance_minor: 1
+`
+	c, err := Parse([]byte(ok), "testdata")
+	if err != nil {
+		t.Fatal(err)
+	}
+	ch := c.Checks[0]
+	if ch.Compare.MaxRows != DefaultMaxRows || !ch.HasAmount() || ch.ID != "" {
+		t.Errorf("max_rows %d, amount %v, id %q", ch.Compare.MaxRows, ch.HasAmount(), ch.ID)
+	}
+	left, right := ch.Side("left"), ch.Side("right")
+	if left.Source != "billing" || left.Pipeline.Kind == 0 || left.Window != 72*time.Hour || left.Timeout != DefaultTimeout {
+		t.Errorf("left: %+v", left)
+	}
+	if right.Source != "stats" || !strings.Contains(right.Query, "group by") || right.Name != "purchases_reach_stats right" {
+		t.Errorf("right: %+v", right)
+	}
+
+	bad := `
+version: 1
+sources:
+  billing: {mongodb: {uri_env: A, database: shop}}
+  stats: {clickhouse: {url_env: C, database: stats}}
+checks:
+  - name: on_the_check
+    source: billing
+    id: day
+    show: [n]
+    compare:
+      left: {source: billing, collection: p, pipeline: [{$match: {a: 1}}]}
+      right: {source: stats, query: select 1}
+      key: [day]
+  - name: sides
+    window: 24h
+    compare:
+      left: {source: nowhere, query: select 1}
+      right: {source: stats, collection: p}
+      key: [day, day]
+  - name: currency_not_in_key
+    compare:
+      left: {source: stats, query: select 1}
+      right: {source: stats, query: select 2}
+      key: [day]
+      amount: {field: amount, unit: cents, currency_field: currency}
+      counts: [day, amount, n, n]
+      tolerance_minor: -1
+      max_rows: -5
+  - name: no_key
+    compare:
+      left: {source: stats, query: select 1}
+      right: {source: stats, query: select 2}
+`
+	_, err = Parse([]byte(bad), ".")
+	if err == nil {
+		t.Fatal("no error")
+	}
+	for _, want := range []string{
+		"check on_the_check: source: a compare check sets it under compare or on each side",
+		"check on_the_check: id: a compare check",
+		"check on_the_check: show: a compare check",
+		`check sides: compare.left: source: unknown "nowhere"`,
+		"check sides: compare.right: collection and pipeline are for mongodb sources",
+		"check sides: compare.right: set query or query_file",
+		"check sides: compare.right: window: the query must compare a time column with {since:DateTime64(6, 'UTC')}",
+		`check sides: compare.key: "day" is listed twice`,
+		`check currency_not_in_key: compare.amount.unit: want minor or major, got "cents"`,
+		`check currency_not_in_key: compare.amount.currency_field: "currency" must be in key`,
+		`check currency_not_in_key: compare.counts: "day" is in key`,
+		`check currency_not_in_key: compare.counts: "amount" is the amount`,
+		`check currency_not_in_key: compare.counts: "n" is listed twice`,
+		"check currency_not_in_key: compare.tolerance_minor: must be 0 or more",
+		"check currency_not_in_key: compare.max_rows: must be positive",
+		"check no_key: compare.key: the columns both sides group by",
+	} {
+		if !strings.Contains(err.Error(), want) {
+			t.Errorf("missing %q in:\n%v", want, err)
+		}
+	}
+	if strings.Contains(err.Error(), "id: the column") {
+		t.Errorf("a side needs no id:\n%v", err)
+	}
+
+	files := strings.Replace(ok, "        pipeline:\n", "        pipeline_file: missing.json\n        pipeline:\n", 1)
+	if _, err := Parse([]byte(files), "testdata"); err == nil || !strings.Contains(err.Error(), "check purchases_reach_stats: compare.left: set pipeline or pipeline_file, not both") {
+		t.Errorf("missing side file: %v", err)
+	}
+}

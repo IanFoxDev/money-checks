@@ -128,7 +128,7 @@ func (c Config) knownEntry(e knownEntry, checks map[string]Check) (Known, []erro
 		switch {
 		case err != nil:
 			errs = append(errs, fmt.Errorf("amount: %w", err))
-		case ok && ch.Amount == nil:
+		case ok && !ch.HasAmount():
 			errs = append(errs, fmt.Errorf("amount: check %s has no amount", e.Check))
 		default:
 			k.Amount = &a
