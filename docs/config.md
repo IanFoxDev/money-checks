@@ -258,8 +258,9 @@ its own database and compares the totals key by key:
 
 A violation is a key only one side returns, an amount that differs by more than
 `tolerance_minor`, or a count that differs. The report shows each key with both sides
-and the difference, right minus left; the totals and `money_check_amount_minor` add
-up the absolute differences, so they say how much money does not match. A known file
+and the difference, right minus left; the totals and
+`money_check_amount_minor_units` add up the absolute differences, so they say how
+much money does not match. A known file
 entry for `2026-10-13/USD` with an `amount` accepts that difference; a different one
 counts again.
 

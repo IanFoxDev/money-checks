@@ -38,7 +38,7 @@ and compares them row by row.
 
 **A violation is a key** that only one side returns, whose amounts differ by more
 than the tolerance, or whose counts differ. Its amount is the difference, right
-minus left; the totals and `money_check_amount_minor` add up the absolute
+minus left; the totals and `money_check_amount_minor_units` add up the absolute
 differences, so they say how much money does not match. The report shows both sides
 and the difference for each key.
 
