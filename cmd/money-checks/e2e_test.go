@@ -4,6 +4,8 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"io"
+	"net/http"
 	"net/url"
 	"os"
 	"path/filepath"
@@ -21,15 +23,17 @@ import (
 const example = "../../examples/subscriptions"
 
 // The subscription shop from examples/: money-checks must find exactly the planted
-// violations, as read-only users of both databases. Needs both test databases.
+// violations, as read-only users of the three databases. Needs all three test
+// databases.
 func TestEndToEndExample(t *testing.T) {
-	pgDSN, mongoURI := os.Getenv("MONEY_CHECKS_TEST_PG_DSN"), os.Getenv("MONEY_CHECKS_TEST_MONGO_URI")
-	if pgDSN == "" || mongoURI == "" {
-		skipWithoutDB(t, "MONEY_CHECKS_TEST_PG_DSN and MONEY_CHECKS_TEST_MONGO_URI are needed; make postgres-up mongo-up")
+	pgDSN, mongoURI, chURL := os.Getenv("MONEY_CHECKS_TEST_PG_DSN"), os.Getenv("MONEY_CHECKS_TEST_MONGO_URI"), os.Getenv("MONEY_CHECKS_TEST_CLICKHOUSE_URL")
+	if pgDSN == "" || mongoURI == "" || chURL == "" {
+		skipWithoutDB(t, "MONEY_CHECKS_TEST_PG_DSN, MONEY_CHECKS_TEST_MONGO_URI and MONEY_CHECKS_TEST_CLICKHOUSE_URL are needed; make postgres-up mongo-up clickhouse-up")
 	}
 	name := fmt.Sprintf("mc_e2e_%d", time.Now().UnixNano())
 	t.Setenv("SHOP_MONGO_URI", seedMongo(t, mongoURI, name))
 	t.Setenv("LEDGER_PG_DSN", seedPostgres(t, pgDSN, name))
+	t.Setenv("STATS_CLICKHOUSE_URL", seedClickHouse(t, chURL, name))
 
 	conf, err := os.ReadFile(filepath.Join(example, "checks.yaml"))
 	if err != nil {
@@ -37,7 +41,9 @@ func TestEndToEndExample(t *testing.T) {
 	}
 	dir := t.TempDir()
 	path := filepath.Join(dir, "checks.yaml")
-	if err := os.WriteFile(path, []byte(strings.Replace(string(conf), "database: shop", "database: "+name, 1)), 0o600); err != nil {
+	conf = []byte(strings.Replace(string(conf), "database: shop", "database: "+name, 1))
+	conf = []byte(strings.Replace(string(conf), "database: stats", "database: "+name, 1))
+	if err := os.WriteFile(path, conf, 0o600); err != nil {
 		t.Fatal(err)
 	}
 	jsonPath := filepath.Join(dir, "report.json")
@@ -176,4 +182,70 @@ func seedPostgres(t *testing.T, adminDSN, name string) string {
 	q.Set("search_path", name)
 	u.RawQuery = q.Encode()
 	return u.String()
+}
+
+// seedClickHouse loads the example statistics into database name and returns the
+// URL of a user with SELECT on it only.
+func seedClickHouse(t *testing.T, adminURL, name string) string {
+	t.Helper()
+	exec := func(database, q string) {
+		t.Helper()
+		u, err := url.Parse(adminURL)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if database != "" {
+			v := u.Query()
+			v.Set("database", database)
+			u.RawQuery = v.Encode()
+		}
+		req, err := http.NewRequestWithContext(context.Background(), http.MethodPost, u.String(), strings.NewReader(q))
+		if err != nil {
+			t.Fatal(err)
+		}
+		resp, err := http.DefaultClient.Do(req)
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer func() { _ = resp.Body.Close() }()
+		if resp.StatusCode != http.StatusOK {
+			b, _ := io.ReadAll(resp.Body)
+			t.Fatalf("%s: %s", q, b)
+		}
+	}
+	stats, err := os.ReadFile(filepath.Join(example, "clickhouse", "stats.sql"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	user := "checks_" + name
+	exec("", "create database "+name)
+	t.Cleanup(func() {
+		exec("", "drop user if exists "+user)
+		exec("", "drop database "+name)
+	})
+	// The HTTP interface runs one statement at a time.
+	for _, q := range strings.Split(string(stats), ";") {
+		if strings.TrimSpace(stripComments(q)) != "" {
+			exec(name, q)
+		}
+	}
+	exec("", "create user "+user+" identified by 'checks'")
+	exec("", "grant select on "+name+".* to "+user)
+	u, err := url.Parse(adminURL)
+	if err != nil {
+		t.Fatal(err)
+	}
+	u.User = url.UserPassword(user, "checks")
+	return u.String()
+}
+
+// stripComments drops the -- comment lines of an SQL file.
+func stripComments(q string) string {
+	var lines []string
+	for _, line := range strings.Split(q, "\n") {
+		if !strings.HasPrefix(strings.TrimSpace(line), "--") {
+			lines = append(lines, line)
+		}
+	}
+	return strings.Join(lines, "\n")
 }
