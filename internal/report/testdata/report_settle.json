@@ -1,0 +1,84 @@
+{
+  "version": 1,
+  "started_at": "2026-10-16T06:00:00Z",
+  "summary": {
+    "checks": 2,
+    "violations": 1,
+    "failed": 1,
+    "passed": 0
+  },
+  "warnings": [],
+  "checks": [
+    {
+      "name": "purchases_reach_stats",
+      "description": "Every purchase reaches the daily statistics.",
+      "source": "billing",
+      "right_source": "stats",
+      "severity": "error",
+      "status": "violations",
+      "violations": 2,
+      "totals": [
+        {
+          "currency": "USD",
+          "minor": 3200,
+          "amount": "32.00"
+        }
+      ],
+      "samples": [
+        {
+          "id": "2026-10-13/USD",
+          "amount": {
+            "currency": "USD",
+            "minor": 200,
+            "amount": "2.00"
+          },
+          "fields": {
+            "left": "20.00 USD",
+            "problem": "amount differs",
+            "right": "22.00 USD"
+          }
+        },
+        {
+          "id": "2026-10-14/USD",
+          "amount": {
+            "currency": "USD",
+            "minor": -3000,
+            "amount": "-30.00"
+          },
+          "fields": {
+            "left": "30.00 USD",
+            "problem": "only left",
+            "right": "-"
+          }
+        }
+      ],
+      "duration_ms": 0,
+      "scope": "window",
+      "since": "2026-10-13T06:00:00Z",
+      "window": "72h",
+      "until": "2026-10-16T05:45:00Z",
+      "settle": "15m",
+      "known": 0,
+      "known_totals": [],
+      "known_samples": [],
+      "resolved": []
+    },
+    {
+      "name": "payouts_match",
+      "source": "ledger",
+      "right_source": "stats",
+      "severity": "warn",
+      "status": "failed",
+      "violations": 0,
+      "totals": [],
+      "samples": [],
+      "error": "right: more than max_rows (100000) rows; a side returns one row per key, grouped in the query",
+      "duration_ms": 0,
+      "scope": "full",
+      "known": 0,
+      "known_totals": [],
+      "known_samples": [],
+      "resolved": []
+    }
+  ]
+}

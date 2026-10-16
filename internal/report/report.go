@@ -26,7 +26,7 @@ func Markdown(w io.Writer, r check.Report) error {
 	withKnown, withWindow := false, false
 	for _, res := range r.Results {
 		withKnown = withKnown || res.Known > 0 || len(res.Resolved) > 0
-		withWindow = withWindow || res.Scope == check.Window
+		withWindow = withWindow || res.Scope == check.Window || res.Settle > 0
 	}
 	b.WriteString("| Check | Severity | Status | Violations | Amount |")
 	align := "|---|---|---|---:|---:|"
@@ -62,8 +62,13 @@ func Markdown(w io.Writer, r check.Report) error {
 			continue
 		}
 		head := fmt.Sprintf("%s, severity %s", sources(res), res.Severity)
-		if res.Scope == check.Window {
+		switch {
+		case res.Scope == check.Window && res.Settle > 0:
+			head += fmt.Sprintf(", rows from %s to %s (%s)", res.Since.Format("2006-01-02 15:04 UTC"), res.Until.Format("2006-01-02 15:04 UTC"), rows(res))
+		case res.Scope == check.Window:
 			head += fmt.Sprintf(", rows since %s (%s)", res.Since.Format("2006-01-02 15:04 UTC"), rows(res))
+		case res.Settle > 0:
+			head += fmt.Sprintf(", rows before %s (%s)", res.Until.Format("2006-01-02 15:04 UTC"), rows(res))
 		}
 		if res.Violations == 0 {
 			fmt.Fprintf(&b, "%s. No new violations.\n", head)
@@ -147,12 +152,17 @@ func samples(b *strings.Builder, res check.Result, rows []check.Sample, total in
 	}
 }
 
-// rows says which rows a check read: "last 24h" or "all".
+// rows says which rows a check read: "last 24h" or "all", and "up to 15m ago"
+// with settle.
 func rows(res check.Result) string {
+	s := "all"
 	if res.Scope == check.Window {
-		return "last " + check.Span(res.Window)
+		s = "last " + check.Span(res.Window)
 	}
-	return "all"
+	if res.Settle > 0 {
+		s += " up to " + check.Span(res.Settle) + " ago"
+	}
+	return s
 }
 
 func knownCount(res check.Result) string {
@@ -246,6 +256,9 @@ type jsonCheck struct {
 	Scope  string     `json:"scope"`
 	Since  *time.Time `json:"since,omitempty"`
 	Window string     `json:"window,omitempty"`
+	// Until is the end of the rows a compare check with settle read.
+	Until  *time.Time `json:"until,omitempty"`
+	Settle string     `json:"settle,omitempty"`
 
 	Known        int64          `json:"known"`
 	KnownTotals  []jsonMoney    `json:"known_totals"`
@@ -295,6 +308,10 @@ func JSON(w io.Writer, r check.Report) error {
 		if res.Scope == check.Window {
 			since := res.Since
 			c.Since, c.Window = &since, check.Span(res.Window)
+		}
+		if res.Settle > 0 {
+			until := res.Until
+			c.Until, c.Settle = &until, check.Span(res.Settle)
 		}
 		for _, t := range res.Totals {
 			c.Totals = append(c.Totals, toJSONMoney(t))

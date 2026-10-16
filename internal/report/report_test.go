@@ -170,6 +170,31 @@ func withCompare() check.Report {
 	}
 }
 
+// withSettle is withCompare() from a window run, with settle on the compare check.
+func withSettle() check.Report {
+	r := withCompare()
+	c := &r.Results[0]
+	c.Scope, c.Window, c.Since = check.Window, 72*time.Hour, r.StartedAt.Add(-72*time.Hour)
+	c.Settle, c.Until = 15*time.Minute, r.StartedAt.Add(-15*time.Minute)
+	return r
+}
+
+func TestMarkdownSettle(t *testing.T) {
+	var b bytes.Buffer
+	if err := Markdown(&b, withSettle()); err != nil {
+		t.Fatal(err)
+	}
+	golden(t, "report_settle.md", b.Bytes())
+}
+
+func TestJSONSettle(t *testing.T) {
+	var b bytes.Buffer
+	if err := JSON(&b, withSettle()); err != nil {
+		t.Fatal(err)
+	}
+	golden(t, "report_settle.json", b.Bytes())
+}
+
 func TestMarkdownCompare(t *testing.T) {
 	var b bytes.Buffer
 	if err := Markdown(&b, withCompare()); err != nil {
