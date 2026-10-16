@@ -208,3 +208,19 @@ func TestCompareWindow(t *testing.T) {
 		t.Errorf("left got %s, right got %s, want %s", f.since["daily left"], f.since["daily right"], want)
 	}
 }
+
+// Both sides read up to the same moment, on a full run too.
+func TestCompareSettle(t *testing.T) {
+	yaml := strings.Replace(compareConf, "  - name: daily\n", "  - name: daily\n    settle: 15m\n", 1)
+	yaml = strings.Replace(yaml, "pipeline: [{$match: {a: 1}}]", `pipeline: [{$match: {$expr: {$lt: ["$at", "$$until"]}}}]`, 1)
+	yaml = strings.Replace(yaml, "query: q}", "query: \"select {until:DateTime64(6, 'UTC')}\"}", 1)
+	f := &fake{rows: compareRows()}
+	r := runFake(t, load(t, yaml), f)
+	want := r.StartedAt.Add(-15 * time.Minute)
+	if res := r.Results[0]; res.Scope != Full || !res.Until.Equal(want) || res.Settle != 15*time.Minute || res.Violations != 3 {
+		t.Errorf("scope %s, until %s, settle %s, violations %d", res.Scope, res.Until, res.Settle, res.Violations)
+	}
+	if !f.until["daily left"].Equal(want) || !f.until["daily right"].Equal(want) || !f.since["daily left"].IsZero() {
+		t.Errorf("left got %s..%s, right got ..%s, want ..%s", f.since["daily left"], f.until["daily left"], f.until["daily right"], want)
+	}
+}

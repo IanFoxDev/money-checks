@@ -49,12 +49,15 @@ func TestEndToEndCompare(t *testing.T) {
 		at, currency string
 		amount       float64
 	}{
-		{"2026-10-12T09:00:00Z", "USD", 10.99}, {"2026-10-12T23:59:59Z", "USD", 5.01},
-		{"2026-10-13T00:00:00Z", "USD", 20.00}, {"2026-10-13T12:00:00Z", "EUR", 7.50},
-		{"2026-10-14T08:00:00Z", "USD", 3.30},
+		{"2026-10-04T09:00:00Z", "USD", 10.99}, {"2026-10-04T23:59:59Z", "USD", 5.01},
+		{"2026-10-05T00:00:00Z", "USD", 20.00}, {"2026-10-05T12:00:00Z", "EUR", 7.50},
+		{"2026-10-06T08:00:00Z", "USD", 3.30},
 	} {
 		docs = append(docs, bson.D{{Key: "paid_at", Value: at(p.at)}, {Key: "currency", Value: p.currency}, {Key: "amount", Value: p.amount}})
 	}
+	// A purchase of this minute, still on its way to ClickHouse: settle leaves
+	// today out of both sides.
+	docs = append(docs, bson.D{{Key: "paid_at", Value: fixed().Add(-5 * time.Minute)}, {Key: "currency", Value: "USD"}, {Key: "amount", Value: 9.99}})
 	if _, err := db.Collection("purchases").InsertMany(ctx, docs); err != nil {
 		t.Fatal(err)
 	}
@@ -78,10 +81,10 @@ func TestEndToEndCompare(t *testing.T) {
 	ch("CREATE DATABASE " + name)
 	t.Cleanup(func() { ch("DROP DATABASE " + name) })
 	ch("CREATE TABLE " + name + ".daily (day Date, currency LowCardinality(String), amount Decimal(18, 2), n UInt64) ENGINE = MergeTree ORDER BY (day, currency)")
-	// 2026-10-13 USD is 2.00 more with one purchase more, 2026-10-13 EUR is
-	// missing, 2026-10-15 USD has no purchases behind it.
-	ch("INSERT INTO " + name + ".daily VALUES ('2026-10-12', 'USD', 16.00, 2), ('2026-10-13', 'USD', 22.00, 2), " +
-		"('2026-10-14', 'USD', 3.30, 1), ('2026-10-15', 'USD', 1.00, 1)")
+	// 2026-10-05 USD is 2.00 more with one purchase more, 2026-10-05 EUR is
+	// missing, 2026-10-07 USD has no purchases behind it.
+	ch("INSERT INTO " + name + ".daily VALUES ('2026-10-04', 'USD', 16.00, 2), ('2026-10-05', 'USD', 22.00, 2), " +
+		"('2026-10-06', 'USD', 3.30, 1), ('2026-10-07', 'USD', 1.00, 1)")
 
 	t.Setenv("CMP_MONGO_URI", mongoURI)
 	t.Setenv("CMP_CLICKHOUSE_URL", chURL)
@@ -92,11 +95,13 @@ sources:
   stats: {clickhouse: {url_env: CMP_CLICKHOUSE_URL, database: ` + name + `, require_read_only: false}}
 checks:
   - name: purchases_reach_stats
+    settle: 15m
     compare:
       left:
         source: billing
         collection: purchases
         pipeline:
+          - $match: {$expr: {$lt: ["$paid_at", {$dateTrunc: {date: "$$until", unit: day}}]}}
           - $group:
               _id: {day: {$dateToString: {format: "%Y-%m-%d", date: "$paid_at"}}, currency: "$currency"}
               amount: {$sum: "$amount"}
@@ -104,7 +109,7 @@ checks:
           - $project: {_id: 0, day: "$_id.day", currency: "$_id.currency", amount: {$round: ["$amount", 2]}, n: 1}
       right:
         source: stats
-        query: select day, currency, amount, n from daily
+        query: "select day, currency, amount, n from daily where day < toDate({until:DateTime64(6, 'UTC')})"
       key: [day, currency]
       amount: {field: amount, unit: major, currency_field: currency}
       counts: [n]
@@ -144,9 +149,9 @@ checks:
 		got = append(got, tot.Amount+" "+tot.Currency)
 	}
 	want := []string{
-		"2026-10-13/EUR -7.50 only left",
-		"2026-10-13/USD 2.00 amount differs, n differs",
-		"2026-10-15/USD 1.00 only right",
+		"2026-10-05/EUR -7.50 only left",
+		"2026-10-05/USD 2.00 amount differs, n differs",
+		"2026-10-07/USD 1.00 only right",
 		"7.50 EUR",
 		"3.00 USD",
 	}
