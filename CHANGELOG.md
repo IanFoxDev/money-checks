@@ -8,6 +8,12 @@ configuration, the report format or the metric names; such changes are marked
 
 ## [Unreleased]
 
+## [0.3.0] - 2026-10-16
+
+Money that lives in two databases: a check can compare the totals of MongoDB,
+PostgreSQL or ClickHouse against each other, key by key, and wait for the rows that
+are still on their way from one to the other. ClickHouse is a source of its own.
+
 ### Added
 
 - ClickHouse sources (`clickhouse` with `url_env` and `database`), read over HTTP.
@@ -28,6 +34,8 @@ configuration, the report format or the metric names; such changes are marked
   given to the query as `$2`, `$$until` or `{until:DateTime64(6, 'UTC')}`, so rows
   still on their way from one side to the other are not violations. The report
   and the JSON report show the end (`until`).
+- The example shop has daily payment totals in ClickHouse and a `compare` check
+  against the payments in MongoDB, with three planted differences.
 
 ## [0.2.0] - 2026-10-12
 
@@ -89,6 +97,7 @@ CI, with the database tests required to run.
 - `show` and `mask` for the columns a report may contain.
 - Docker image and the example in `examples/subscriptions`.
 
-[Unreleased]: https://github.com/IanFoxDev/money-checks/compare/v0.2.0...HEAD
+[Unreleased]: https://github.com/IanFoxDev/money-checks/compare/v0.3.0...HEAD
+[0.3.0]: https://github.com/IanFoxDev/money-checks/compare/v0.2.0...v0.3.0
 [0.2.0]: https://github.com/IanFoxDev/money-checks/compare/v0.1.0...v0.2.0
 [0.1.0]: https://github.com/IanFoxDev/money-checks/releases/tag/v0.1.0
