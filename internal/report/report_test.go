@@ -143,3 +143,45 @@ func TestJSONEmptyListsAreNotNull(t *testing.T) {
 		}
 	}
 }
+
+// withCompare is a run with a compare check and a failed one.
+func withCompare() check.Report {
+	usd := func(minor int64) *check.Money { return &check.Money{Currency: "USD", Minor: minor, Exponent: 2} }
+	fields := func(left, right, problem string) []check.Field {
+		return []check.Field{{Name: "left", Value: left}, {Name: "right", Value: right}, {Name: "problem", Value: problem}}
+	}
+	return check.Report{
+		StartedAt: time.Date(2026, 10, 16, 6, 0, 0, 0, time.UTC),
+		Results: []check.Result{
+			{
+				Name: "purchases_reach_stats", Description: "Every purchase reaches the daily statistics.",
+				Source: "billing", RightSource: "stats", Severity: "error", Status: check.StatusViolations, Violations: 2, Scope: check.Full,
+				Totals: []check.Money{{Currency: "USD", Minor: 3200, Exponent: 2}},
+				Samples: []check.Sample{
+					{ID: "2026-10-13/USD", Amount: usd(200), Fields: fields("20.00 USD", "22.00 USD", "amount differs")},
+					{ID: "2026-10-14/USD", Amount: usd(-3000), Fields: fields("30.00 USD", "-", "only left")},
+				},
+			},
+			{
+				Name: "payouts_match", Source: "ledger", RightSource: "stats", Severity: "warn", Status: check.StatusFailed, Scope: check.Full,
+				Error: "right: more than max_rows (100000) rows; a side returns one row per key, grouped in the query",
+			},
+		},
+	}
+}
+
+func TestMarkdownCompare(t *testing.T) {
+	var b bytes.Buffer
+	if err := Markdown(&b, withCompare()); err != nil {
+		t.Fatal(err)
+	}
+	golden(t, "report_compare.md", b.Bytes())
+}
+
+func TestJSONCompare(t *testing.T) {
+	var b bytes.Buffer
+	if err := JSON(&b, withCompare()); err != nil {
+		t.Fatal(err)
+	}
+	golden(t, "report_compare.json", b.Bytes())
+}

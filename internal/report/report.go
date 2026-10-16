@@ -58,10 +58,10 @@ func Markdown(w io.Writer, r check.Report) error {
 			fmt.Fprintf(&b, "%s\n\n", strings.TrimSpace(res.Description))
 		}
 		if res.Status == check.StatusFailed {
-			fmt.Fprintf(&b, "Source `%s`. The check failed: %s\n", res.Source, res.Error)
+			fmt.Fprintf(&b, "%s. The check failed: %s\n", sources(res), res.Error)
 			continue
 		}
-		head := fmt.Sprintf("Source `%s`, severity %s", res.Source, res.Severity)
+		head := fmt.Sprintf("%s, severity %s", sources(res), res.Severity)
 		if res.Scope == check.Window {
 			head += fmt.Sprintf(", rows since %s (%s)", res.Since.Format("2006-01-02 15:04 UTC"), rows(res))
 		}
@@ -73,7 +73,7 @@ func Markdown(w io.Writer, r check.Report) error {
 				fmt.Fprintf(&b, ", %s", totals(res.Totals))
 			}
 			b.WriteString(".\n")
-			samples(&b, res.Samples, res.Violations, "known file", func(s check.Sample) string { return s.Note })
+			samples(&b, res, res.Samples, res.Violations, "known file", func(s check.Sample) string { return s.Note })
 		}
 		if res.Known > 0 {
 			fmt.Fprintf(&b, "\n%s, not counted", plural(res.Known, "known violation"))
@@ -81,7 +81,7 @@ func Markdown(w io.Writer, r check.Report) error {
 				fmt.Fprintf(&b, ", %s", totals(res.KnownTotals))
 			}
 			b.WriteString(".\n")
-			samples(&b, res.KnownSamples, res.Known, "accepted because", func(s check.Sample) string { return s.Reason })
+			samples(&b, res, res.KnownSamples, res.Known, "accepted because", func(s check.Sample) string { return s.Reason })
 		}
 		if len(res.Resolved) > 0 {
 			b.WriteString("\nNo longer found; these entries can be removed from the known file:\n\n")
@@ -94,10 +94,19 @@ func Markdown(w io.Writer, r check.Report) error {
 	return err
 }
 
+// sources names the source of a check, or both sides of a compare check.
+func sources(res check.Result) string {
+	if res.RightSource != "" {
+		return fmt.Sprintf("Sources `%s` (left) and `%s` (right)", res.Source, res.RightSource)
+	}
+	return fmt.Sprintf("Source `%s`", res.Source)
+}
+
 // samples writes a table of rows: id, amount, the shown columns and, when any row
 // has one, a column from the known file. Its header has a space, so it does not
-// look like one of the shown columns.
-func samples(b *strings.Builder, rows []check.Sample, total int64, extra string, text func(check.Sample) string) {
+// look like one of the shown columns. The amount of a compare check is the
+// difference, right minus left.
+func samples(b *strings.Builder, res check.Result, rows []check.Sample, total int64, extra string, text func(check.Sample) string) {
 	if len(rows) == 0 {
 		return
 	}
@@ -107,7 +116,11 @@ func samples(b *strings.Builder, rows []check.Sample, total int64, extra string,
 	}
 	header := []string{"id"}
 	if rows[0].Amount != nil {
-		header = append(header, "amount")
+		if res.RightSource != "" {
+			header = append(header, "difference")
+		} else {
+			header = append(header, "amount")
+		}
 	}
 	for _, f := range rows[0].Fields {
 		header = append(header, f.Name)
@@ -216,9 +229,12 @@ type jsonReport struct {
 }
 
 type jsonCheck struct {
-	Name        string       `json:"name"`
-	Description string       `json:"description,omitempty"`
-	Source      string       `json:"source"`
+	Name        string `json:"name"`
+	Description string `json:"description,omitempty"`
+	Source      string `json:"source"`
+	// RightSource is set for a compare check; Source is its left side, and the
+	// amounts are differences, right minus left.
+	RightSource string       `json:"right_source,omitempty"`
 	Severity    string       `json:"severity"`
 	Status      string       `json:"status"`
 	Violations  int64        `json:"violations"`
@@ -270,7 +286,7 @@ func JSON(w io.Writer, r check.Report) error {
 	}
 	for _, res := range r.Results {
 		c := jsonCheck{
-			Name: res.Name, Description: strings.TrimSpace(res.Description), Source: res.Source,
+			Name: res.Name, Description: strings.TrimSpace(res.Description), Source: res.Source, RightSource: res.RightSource,
 			Severity: res.Severity, Status: res.Status, Violations: res.Violations,
 			Error: res.Error, DurationMS: res.Duration.Milliseconds(), Scope: string(res.Scope),
 			Totals: []jsonMoney{}, Samples: []jsonSample{},
