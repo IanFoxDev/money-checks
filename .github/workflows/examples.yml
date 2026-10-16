@@ -33,6 +33,8 @@ jobs:
         run: |
           docker compose up -d money-checks
           for i in $(seq 1 60); do curl -sf 127.0.0.1:8080/readyz && break; sleep 1; done
-          curl -s 127.0.0.1:8080/metrics | grep -x 'money_check_violations{check="unbalanced_transactions",scope="full",severity="error"} 3'
+          curl -s 127.0.0.1:8080/metrics > metrics.txt
+          grep -x 'money_check_violations{check="unbalanced_transactions",scope="full",severity="error"} 3' metrics.txt
+          grep -x 'money_check_amount_minor_units{check="payments_reach_stats",currency="USD",scope="full"} 11399' metrics.txt
       - if: always()
         run: docker compose down -v
