@@ -24,6 +24,10 @@ configuration, the report format or the metric names; such changes are marked
   than `tolerance_minor` or a count that differs is a violation. The report shows
   both sides and the difference; known file entries match by key. JSON reports have
   `right_source` for these checks. See `docs/adr/0004-compare.md`.
+- `settle` for `compare` checks: both sides read only the rows before `settle` ago,
+  given to the query as `$2`, `$$until` or `{until:DateTime64(6, 'UTC')}`, so rows
+  still on their way from one side to the other are not violations. The report
+  and the JSON report show the end (`until`).
 
 ## [0.2.0] - 2026-10-12
 

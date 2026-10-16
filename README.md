@@ -170,7 +170,9 @@ by key:
 A key that only one side has, an amount or a count that differs, is a violation with
 the id `2026-10-13/USD`. The report shows both sides and the difference; the amount
 metric is the money that does not match. Amounts meet in minor units, so a MongoDB
-double and a ClickHouse `Decimal` compare exactly. Details: `docs/config.md`.
+double and a ClickHouse `Decimal` compare exactly. `settle: 15m` leaves the last
+fifteen minutes out of both sides, so a purchase still on its way through Kafka is
+not reported. Details: `docs/config.md`.
 
 ## Known violations
 

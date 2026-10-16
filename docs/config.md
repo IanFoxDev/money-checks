@@ -102,6 +102,7 @@ A list. Checks run in this order, one at a time.
 | `timeout` | | overrides `defaults.timeout` |
 | `window` | | `24h`: `serve` and `run --window` read only the rows since then, below |
 | `compare` | | two sides whose totals must match, below; replaces `source`, the query, `id`, `amount`, `show` and `mask` |
+| `settle` | compare | `15m`: both sides leave out the rows of the last 15 minutes, below |
 
 Every row the query returns is a violation. Write the query so that a correct
 database returns nothing.
@@ -270,11 +271,53 @@ every key is "only left" and "only right". Amounts are compared in minor units, 
 as floating point numbers; a side whose amounts are in another unit converts them in
 its query.
 
-The sides run one after the other, and the data behind them is not written at the
-same moment: a purchase of the last minute is in MongoDB and still on its way to
-ClickHouse. Until a check can leave the last minutes out of both sides, end the
-period of a `compare` check before the current hour.
 Why it works this way: `docs/adr/0004-compare.md`.
+
+### settle
+
+The two sides are not written at the same moment: a purchase of the last minute is
+in MongoDB and still on its way to ClickHouse. Compared as they are, the freshest
+rows always differ, the check fires on every run of `serve`, and someone turns it
+off. `settle` gives both sides an end, `settle` before the start of the run, and the
+query reads only the rows before it:
+
+```yaml
+  - name: purchases_reach_stats
+    window: 72h
+    settle: 15m
+    compare:
+      left:
+        source: billing
+        collection: purchases
+        pipeline:
+          - $match:
+              $expr:
+                $and:
+                  - {$gte: ["$paid_at", "$$since"]}
+                  - {$lt: ["$paid_at", {$dateTrunc: {date: "$$until", unit: day}}]}
+          # $group and $project as above
+      right:
+        source: stats
+        query: |
+          select toString(day) as day, currency, sum(amount) as amount, sum(purchases) as n
+          from daily_purchases
+          where day >= toDate({since:DateTime64(6, 'UTC')})
+            and day < toDate({until:DateTime64(6, 'UTC')})
+          group by day, currency
+```
+
+The end is `$$until` in a pipeline, `{until:DateTime64(6, 'UTC')}` on ClickHouse and
+`$2` on PostgreSQL. A PostgreSQL query with `$2` uses `$1` too, because PostgreSQL
+cannot tell the type of `$2` alone; without a window `$1` is
+`0001-01-01T00:00:00Z`. Every side of a check with `settle` must use the end, and
+a query that uses it needs `settle`. `settle` is shorter than `window`, and only
+`compare` checks have it: a check of one database sees its rows as they are written.
+
+Mind the buckets. When one side keeps daily totals, a row for today is partial
+until the day ends, whatever `settle` says. Compare whole days on both sides, as
+above: `day < toDate(until)` on one side, `$dateTrunc` of `$$until` on the other.
+Pick `settle` longer than the usual delay between the sides, and alert on the lag
+itself elsewhere: a consumer that is an hour behind is an incident of its own.
 
 ## serve
 
@@ -397,4 +440,5 @@ again has a `note` that says why. `scope` is `full` when the check read every ro
 `window` when it read the rows since `since`; then `resolved` is empty, because a
 window run does not see older rows. A `compare` check has `right_source` next to
 `source`, its left side; the amount of each of its samples is the difference, right
-minus left, and its `fields` are both sides and the `problem`.
+minus left, and its `fields` are both sides and the `problem`. With `settle` it has
+`until`, the end of the rows both sides read, and `settle`.

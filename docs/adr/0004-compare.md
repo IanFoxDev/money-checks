@@ -58,9 +58,10 @@ it.
 ## Consequences
 
 - The two sides are read at different moments, and the data behind them is written
-  at different moments. Fresh rows always differ. A delay that leaves the last
-  minutes out of both sides (`settle`) is the next step; until then, a `compare`
-  check should end its period before the current hour.
+  at different moments. Fresh rows always differ. `settle` leaves the last minutes
+  out of both sides: the queries get an end, `settle` before the start of the run,
+  as a parameter next to the start of the window. Only `compare` checks have it; a
+  check of one database has no second side to wait for.
 - The key has to be produced as the same text on both sides, and that is the
   author's work: `$dateToString` in MongoDB, `toString(day)` in ClickHouse.
 - One `amount` serves both sides. A side whose amounts are in a different unit
