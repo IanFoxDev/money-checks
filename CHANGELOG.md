@@ -19,6 +19,11 @@ configuration, the report format or the metric names; such changes are marked
 - `window` for ClickHouse checks: the query gets the start of the window as
   `{since:DateTime64(6, 'UTC')}`, sent as a server parameter. Another type for
   `since` is a configuration error.
+- `compare` checks: two sides, each a query or a pipeline against any source,
+  return totals by key, and a key only one side has, an amount that differs by more
+  than `tolerance_minor` or a count that differs is a violation. The report shows
+  both sides and the difference; known file entries match by key. JSON reports have
+  `right_source` for these checks. See `docs/adr/0004-compare.md`.
 
 ## [0.2.0] - 2026-10-12
 

@@ -101,6 +101,7 @@ A list. Checks run in this order, one at a time.
 | `samples` | | rows shown in the report; overrides `defaults.samples` |
 | `timeout` | | overrides `defaults.timeout` |
 | `window` | | `24h`: `serve` and `run --window` read only the rows since then, below |
+| `compare` | | two sides whose totals must match, below; replaces `source`, the query, `id`, `amount`, `show` and `mask` |
 
 Every row the query returns is a violation. Write the query so that a correct
 database returns nothing.
@@ -197,8 +198,8 @@ microseconds, so the configuration check refuses it.
 
 Nothing is put into the text of the query. On a full pass the start is
 `0001-01-01T00:00:00Z` (`1970-01-01` on ClickHouse, so that `toDate()` of it does
-not wrap around), so the same query reads every row. A check with `window` must use the parameter, and a
-query or pipeline that uses it must have a `window`.
+not wrap around), so the same query reads every row. A check with `window` must use
+the parameter, and a query or pipeline that uses it must have a `window`.
 `window` is at least `serve.interval`, or rows written between two runs would wait
 for the next full pass. Hours are the largest unit: a week is `168h`.
 
@@ -211,6 +212,69 @@ column of the window needs an index; money-checks does not create one.
 A row that leaves the window is not fixed. Only a full pass says that violations
 are gone: the metrics keep one series per `scope`, and the Slack message that a check
 no longer finds violations comes from a full pass only.
+
+### compare
+
+Some money is written to two databases: purchases to MongoDB by the billing service,
+daily totals to ClickHouse by a Kafka consumer. A `compare` check groups each side in
+its own database and compares the totals key by key:
+
+```yaml
+  - name: purchases_reach_stats
+    description: Every purchase is in the daily statistics, once.
+    window: 72h
+    compare:
+      left:
+        source: billing
+        collection: purchases
+        pipeline:
+          - $match: {$expr: {$gte: ["$paid_at", "$$since"]}}
+          - $group:
+              _id: {day: {$dateToString: {format: "%Y-%m-%d", date: "$paid_at"}}, currency: "$currency"}
+              amount: {$sum: "$amount"}
+              n: {$sum: 1}
+          - $project: {_id: 0, day: "$_id.day", currency: "$_id.currency", amount: {$round: ["$amount", 2]}, n: 1}
+      right:
+        source: stats
+        query: |
+          select day, currency, sum(amount) as amount, sum(purchases) as n
+          from daily_purchases
+          where day >= toDate({since:DateTime64(6, 'UTC')})
+          group by day, currency
+      key: [day, currency]
+      amount: {field: amount, unit: major, currency_field: currency}
+      counts: [n]
+```
+
+| Key | | |
+|---|---|---|
+| `left`, `right` | required | each a `source` with a `collection` and a `pipeline` (or `pipeline_file`), or a `query` (or `query_file`); the two sources may be the same |
+| `key` | required | the columns both sides return and group by; the id of a violation is their values joined with `/`, such as `2026-10-13/USD` |
+| `amount` | | as for other checks, read the same way on both sides; `currency_field` must be in `key` |
+| `counts` | | integer columns that must be equal on both sides |
+| `tolerance_minor` | | a difference of the amount up to this many minor units is not a violation; default 0 |
+| `max_rows` | | the most rows a side may return, default 100000; more is an error of the check |
+
+A violation is a key only one side returns, an amount that differs by more than
+`tolerance_minor`, or a count that differs. The report shows each key with both sides
+and the difference, right minus left; the totals and `money_check_amount_minor` add
+up the absolute differences, so they say how much money does not match. A known file
+entry for `2026-10-13/USD` with an `amount` accepts that difference; a different one
+counts again.
+
+Each side returns one row per key: a side that returns a key twice, or more than
+`max_rows` rows, fails the check rather than compare half of the data. The key must
+come out as the same text on both sides. A MongoDB date is written as
+`2026-10-13T00:00:00Z` unless the pipeline formats it with `$dateToString`, and then
+every key is "only left" and "only right". Amounts are compared in minor units, never
+as floating point numbers; a side whose amounts are in another unit converts them in
+its query.
+
+The sides run one after the other, and the data behind them is not written at the
+same moment: a purchase of the last minute is in MongoDB and still on its way to
+ClickHouse. Until a check can leave the last minutes out of both sides, end the
+period of a `compare` check before the current hour.
+Why it works this way: `docs/adr/0004-compare.md`.
 
 ## serve
 
@@ -331,4 +395,6 @@ new violations; `known*` are the rows the known file accepts, and `resolved` lis
 its entries the check no longer finds. A sample that is in the known file but counts
 again has a `note` that says why. `scope` is `full` when the check read every row and
 `window` when it read the rows since `since`; then `resolved` is empty, because a
-window run does not see older rows.
+window run does not see older rows. A `compare` check has `right_source` next to
+`source`, its left side; the amount of each of its samples is the difference, right
+minus left, and its `fields` are both sides and the `problem`.

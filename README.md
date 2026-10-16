@@ -148,6 +148,30 @@ The window picks the payments that changed; the invariant is checked over all th
 refunds. `where created_at >= $1` alone would miss a payment refunded once last month
 and once today. The column needs an index. Details: `docs/config.md`.
 
+## Compare two databases
+
+When purchases are written to MongoDB and their daily totals reach ClickHouse through
+Kafka, a consumer that skips a batch leaves both databases looking fine on their
+own. A `compare` check groups each side in its own database and compares the totals
+by key:
+
+```yaml
+  - name: purchases_reach_stats
+    compare:
+      left: {source: billing, collection: purchases, pipeline_file: purchases_by_day.yaml}
+      right:
+        source: stats
+        query: select day, currency, sum(amount) as amount, sum(purchases) as n from daily_purchases group by day, currency
+      key: [day, currency]
+      amount: {field: amount, unit: major, currency_field: currency}
+      counts: [n]
+```
+
+A key that only one side has, an amount or a count that differs, is a violation with
+the id `2026-10-13/USD`. The report shows both sides and the difference; the amount
+metric is the money that does not match. Amounts meet in minor units, so a MongoDB
+double and a ClickHouse `Decimal` compare exactly. Details: `docs/config.md`.
+
 ## Known violations
 
 The first run against a real database usually finds old rows that were looked at
@@ -250,9 +274,7 @@ The full configuration: [docs/config.md](docs/config.md).
 
 ## Not yet
 
-MySQL sources, checks that compare two sources (the day's payments in
-one database against the day's revenue in another), a history of violations, and an
-MCP mode so an assistant can run the same named queries. If you need one of these
+MySQL sources, a history of violations, and an MCP mode so an assistant can run the same named queries. If you need one of these
 first, open an issue.
 
 ## Contributing
