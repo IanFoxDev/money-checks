@@ -182,10 +182,15 @@ func (c *clickhouse) post(ctx context.Context, query string, settings url.Values
 	return resp, nil
 }
 
+// chMinTime is the earliest DateTime64. A full pass sends it as the start of the
+// window: no Date, DateTime or DateTime64 value is earlier.
+var chMinTime = time.Date(1900, 1, 1, 0, 0, 0, 0, time.UTC)
+
 // Query runs the check with readonly=2 and the check's timeout as
 // max_execution_time, or with readonly=1 alone when the user's profile allows no
-// settings. Values come back as text, as from PostgreSQL; \N is nil.
-func (c *clickhouse) Query(ctx context.Context, ch config.Check, _ time.Time, each func(Row) error) error {
+// settings. Values come back as text, as from PostgreSQL; \N is nil. A check with
+// a window gets since as the server parameter {since:DateTime64(6, 'UTC')}.
+func (c *clickhouse) Query(ctx context.Context, ch config.Check, since time.Time, each func(Row) error) error {
 	ctx, cancel := context.WithTimeout(ctx, ch.Timeout)
 	defer cancel()
 	settings := url.Values{}
@@ -195,6 +200,15 @@ func (c *clickhouse) Query(ctx context.Context, ch config.Check, _ time.Time, ea
 		settings.Set("readonly", "2")
 		settings.Set("max_execution_time", strconv.FormatInt(int64(math.Ceil(ch.Timeout.Seconds())), 10))
 		settings.Set("cancel_http_readonly_queries_on_client_close", "1")
+	}
+	if ch.Window > 0 {
+		// A query parameter, never text in the query. It is allowed under
+		// readonly=1 too.
+		since = since.UTC()
+		if since.Before(chMinTime) {
+			since = chMinTime
+		}
+		settings.Set("param_since", since.Format("2006-01-02 15:04:05.000000"))
 	}
 	resp, err := c.post(ctx, ch.Query, settings)
 	if err != nil {
