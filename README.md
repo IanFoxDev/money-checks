@@ -267,9 +267,9 @@ is dropped before anything is written. Slack messages carry no rows at all.
 
 ## Example
 
-[examples/subscriptions](examples/subscriptions) is a subscription shop in MongoDB
-and a double-entry ledger in PostgreSQL with ten money bugs planted, and eight checks
-that find them. `docker compose run --rm money-checks run -c ...` prints the report;
+[examples/subscriptions](examples/subscriptions) is a subscription shop in MongoDB,
+a double-entry ledger in PostgreSQL and daily statistics in ClickHouse with thirteen
+money bugs planted, and nine checks that find them. `docker compose run --rm money-checks run -c ...` prints the report;
 CI checks it against the list of planted bugs.
 
 The full configuration: [docs/config.md](docs/config.md).

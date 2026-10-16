@@ -1,11 +1,13 @@
 # Example: a subscription shop
 
-A small shop with its payments, subscriptions and wallets in MongoDB and a
-double-entry ledger in PostgreSQL. The data has money bugs planted on purpose, the
-kind that turn up in real billing code: a renewal charged twice for one month, a
-user with two active subscriptions, one provider transaction recorded on two
-payments, refunds larger than the payment, a wallet balance that no longer matches
-its entries, ledger transactions that do not sum to zero.
+A small shop with its payments, subscriptions and wallets in MongoDB, a
+double-entry ledger in PostgreSQL and daily payment totals in ClickHouse. The data
+has money bugs planted on purpose, the kind that turn up in real billing code: a
+renewal charged twice for one month, a user with two active subscriptions, one
+provider transaction recorded on two payments, refunds larger than the payment, a
+wallet balance that no longer matches its entries, ledger transactions that do not
+sum to zero, daily statistics that lost a payment, a whole batch, and gained a test
+payment.
 
 `checks.yaml` has one check per bug and one that passes. `expected.json` lists what
 money-checks must find. CI runs this example and compares the two.
@@ -21,16 +23,17 @@ The exit code is 1: checks with severity `error` found violations. The report st
 with:
 
 ```
-| Check | Severity | Status | Violations | Amount |
-|---|---|---|---:|---:|
-| two_renewals_in_one_period | error | violations | 1 | 9.99 USD |
-| two_active_subscriptions | error | violations | 2 | 1200 JPY, 9.99 USD |
-| provider_txn_recorded_twice | warn | violations | 1 | 1200 JPY |
-| refund_exceeds_payment | error | violations | 1 | 11.00 USD |
-| wallet_balance_matches_entries | error | violations | 1 | -1.00 EUR |
-| payment_without_subscription | error | ok | 0 |  |
-| unbalanced_transactions | error | violations | 3 | -10.00 EUR, 9.50 USD |
-| negative_wallet_balance | warn | violations | 1 | -3.00 USD |
+| Check | Severity | Status | Violations | Amount | Rows |
+|---|---|---|---:|---:|---|
+| two_renewals_in_one_period | error | violations | 1 | 9.99 USD | all |
+| two_active_subscriptions | error | violations | 2 | 1200 JPY, 9.99 USD | all |
+| provider_txn_recorded_twice | warn | violations | 1 | 1200 JPY | all |
+| refund_exceeds_payment | error | violations | 1 | 11.00 USD | all |
+| wallet_balance_matches_entries | error | violations | 1 | -1.00 EUR | all |
+| payment_without_subscription | error | ok | 0 |  | all |
+| unbalanced_transactions | error | violations | 3 | -10.00 EUR, 9.50 USD | all |
+| negative_wallet_balance | warn | violations | 1 | -3.00 USD | all |
+| payments_reach_stats | error | violations | 3 | 113.99 USD |
 ```
 
 Each check that found something gets a section with up to 10 rows. Emails are
@@ -57,7 +60,25 @@ Set `MC_PORT` if 8080 is taken on your machine.
   `wallet_balance_matches_entries` needs no rounding at all.
 - **JPY has no minor units**: 1200 JPY is 1200, not 12.00. money-checks knows the
   exponent of every ISO 4217 currency.
-- **Both databases are read by users that can only read.** `mongo-init/seed.js`
-  creates a MongoDB user with the `read` role, and `postgres/readonly.sql` a role
-  with `SELECT` only. money-checks refuses a MongoDB user that can write, and runs
-  every PostgreSQL check in a `READ ONLY` transaction regardless of the role.
+- **`payments_reach_stats` compares two databases.** The payments in MongoDB are
+  grouped by day and currency in a pipeline, the statistics in ClickHouse in SQL,
+  and money-checks compares the totals by key. Its section of the report shows each
+  day that differs, both sides and the difference:
+
+  ```
+  | id | difference | left | right | payments left | payments right | problem |
+  |---|---|---|---|---|---|---|
+  | 2026-09-01/USD | -9.99 USD | 19.98 USD | 9.99 USD | 2 | 1 | amount differs, payments differs |
+  | 2026-09-05/USD | -99.00 USD | 99.00 USD | - | 1 | - | only left |
+  | 2026-09-08/USD | 5.00 USD | - | 5.00 USD | - | 1 | only right |
+  ```
+
+  ClickHouse has two rows for 2026-09-07, one per batch; the query sums them, so the
+  day matches. `settle: 15m` with whole days on both sides keeps today and the last
+  minutes out, where the two databases always differ.
+- **Every database is read by a user that can only read.** `mongo-init/seed.js`
+  creates a MongoDB user with the `read` role, `postgres/readonly.sql` a role with
+  `SELECT` only, and `clickhouse/init.sh` a ClickHouse user with `SELECT` on `stats`.
+  money-checks refuses a MongoDB or ClickHouse user that can write, runs every
+  PostgreSQL check in a `READ ONLY` transaction regardless of the role, and sends
+  every ClickHouse query with `readonly=2`.
