@@ -46,6 +46,9 @@ type Result struct {
 	Name        string
 	Description string
 	Source      string
+	// RightSource is the source of the right side of a compare check; Source
+	// is the left one.
+	RightSource string
 	Severity    string
 	Status      string
 	Violations  int64   // rows that are not known violations
@@ -129,12 +132,15 @@ func Run(ctx context.Context, cfg config.Config, scope Scope, open Opener, now f
 			}
 		}
 	}()
-	for _, ch := range cfg.Checks {
-		o, ok := sources[ch.Source]
+	get := func(name string) (source.Source, error) {
+		o, ok := sources[name]
 		if !ok {
-			o.src, o.err = open(ctx, ch.Source, cfg.Sources[ch.Source], warn)
-			sources[ch.Source] = o
+			o.src, o.err = open(ctx, name, cfg.Sources[name], warn)
+			sources[name] = o
 		}
+		return o.src, o.err
+	}
+	for _, ch := range cfg.Checks {
 		start := now()
 		res := Result{
 			Name: ch.Name, Description: ch.Description, Source: ch.Source, Severity: ch.Severity, Scope: Full,
@@ -142,10 +148,21 @@ func Run(ctx context.Context, cfg config.Config, scope Scope, open Opener, now f
 		if scope == Window && ch.Window > 0 {
 			res.Scope, res.Since, res.Window = Window, r.StartedAt.Add(-ch.Window), ch.Window
 		}
-		if o.err != nil {
-			res.Status, res.Error = StatusFailed, o.err.Error()
+		c := &collector{cur: cfg.Money, ch: ch, known: cfg.Known[ch.Name], at: r.StartedAt, res: &res}
+		var err error
+		if ch.Compare != nil {
+			res.Source, res.RightSource = ch.Compare.Left.Source, ch.Compare.Right.Source
+			err = runCompare(ctx, ch, get, c)
 		} else {
-			runOne(ctx, cfg.Money, ch, cfg.Known[ch.Name], r.StartedAt, o.src, &res)
+			var src source.Source
+			if src, err = get(ch.Source); err == nil {
+				err = runOne(ctx, ch, src, c)
+			}
+		}
+		if err != nil {
+			res.Status, res.Error = StatusFailed, err.Error()
+		} else {
+			c.finish()
 		}
 		res.Duration = now().Sub(start)
 		r.Results = append(r.Results, res)
@@ -153,11 +170,9 @@ func Run(ctx context.Context, cfg config.Config, scope Scope, open Opener, now f
 	return r
 }
 
-func runOne(ctx context.Context, cur money.Currencies, ch config.Check, known map[string]config.Known, at time.Time, src source.Source, res *Result) {
-	totals, knownTotals := map[string]*Money{}, map[string]*Money{}
-	seen := map[string]bool{}
+func runOne(ctx context.Context, ch config.Check, src source.Source, c *collector) error {
 	var rows int64
-	err := src.Query(ctx, ch, res.Since, func(row source.Row) error {
+	err := src.Query(ctx, ch, c.res.Since, func(row source.Row) error {
 		rows++
 		id, ok := row.Get(ch.ID)
 		if !ok {
@@ -165,43 +180,80 @@ func runOne(ctx context.Context, cur money.Currencies, ch config.Check, known ma
 		}
 		s := Sample{ID: Display(id)}
 		if ch.Amount != nil {
-			m, err := amount(cur, *ch.Amount, row)
+			m, err := amount(c.cur, *ch.Amount, row)
 			if err != nil {
 				return fmt.Errorf("row %s: %w", s.ID, err)
 			}
 			s.Amount = &m
 		}
-		k, isKnown := known[s.ID]
-		if isKnown {
-			seen[s.ID] = true
-			s.Reason = k.Reason
-			if s.Note = stale(cur, k, s.Amount, at); s.Note != "" {
-				isKnown, s.Reason = false, ""
-			}
-		}
-		count, sums, samples := &res.Violations, totals, &res.Samples
-		if isKnown {
-			count, sums, samples = &res.Known, knownTotals, &res.KnownSamples
-		}
-		*count++
-		if s.Amount != nil {
-			if err := add(sums, *s.Amount); err != nil {
-				return err
-			}
-		}
-		if len(*samples) < *ch.Samples {
-			s.Fields = fields(ch, row)
-			*samples = append(*samples, s)
-		}
-		return nil
+		return c.add(s, func() []Field { return fields(ch, row) })
 	})
 	if err != nil {
-		res.Status, res.Error = StatusFailed, errorText(err, ch)
-		return
+		return errors.New(errorText(err, ch))
 	}
-	res.Totals, res.KnownTotals = sorted(totals), sorted(knownTotals)
-	for id, k := range known {
-		if !seen[id] && res.Scope == Full {
+	return nil
+}
+
+// collector sorts the violations of one check into new and known ones and adds
+// them up.
+type collector struct {
+	cur   money.Currencies
+	ch    config.Check
+	known map[string]config.Known
+	at    time.Time
+	res   *Result
+	// abs adds up the absolute amounts: the differences of a compare check.
+	abs bool
+
+	totals, knownTotals map[string]*Money
+	seen                map[string]bool
+}
+
+// add counts one violation. fields is called only for a row that becomes a sample.
+func (c *collector) add(s Sample, fields func() []Field) error {
+	if c.seen == nil {
+		c.totals, c.knownTotals, c.seen = map[string]*Money{}, map[string]*Money{}, map[string]bool{}
+	}
+	k, isKnown := c.known[s.ID]
+	if isKnown {
+		c.seen[s.ID] = true
+		s.Reason = k.Reason
+		if s.Note = stale(c.cur, k, s.Amount, c.at); s.Note != "" {
+			isKnown, s.Reason = false, ""
+		}
+	}
+	res := c.res
+	count, sums, samples := &res.Violations, c.totals, &res.Samples
+	if isKnown {
+		count, sums, samples = &res.Known, c.knownTotals, &res.KnownSamples
+	}
+	*count++
+	if s.Amount != nil {
+		m := *s.Amount
+		if c.abs && m.Minor < 0 {
+			if m.Minor == math.MinInt64 {
+				return fmt.Errorf("the difference in %s does not fit in int64 minor units", m.Currency)
+			}
+			m.Minor = -m.Minor
+		}
+		if err := add(sums, m); err != nil {
+			return err
+		}
+	}
+	if len(*samples) < *c.ch.Samples {
+		s.Fields = fields()
+		*samples = append(*samples, s)
+	}
+	return nil
+}
+
+// finish sets the totals, the known entries no longer found and the status of a
+// check that ran to the end.
+func (c *collector) finish() {
+	res := c.res
+	res.Totals, res.KnownTotals = sorted(c.totals), sorted(c.knownTotals)
+	for id, k := range c.known {
+		if !c.seen[id] && res.Scope == Full {
 			res.Resolved = append(res.Resolved, Resolved{ID: id, Reason: k.Reason})
 		}
 	}
