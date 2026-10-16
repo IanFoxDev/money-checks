@@ -265,6 +265,8 @@ func TestClickHouseWindow(t *testing.T) {
 		"SELECT id FROM payments WHERE paid_at >= {since:DateTime64(6, 'UTC')} ORDER BY id",
 		// A DateTime column, which starts in 1970.
 		"SELECT id FROM payments WHERE toDateTime(paid_at) >= { since : DateTime64(6, 'UTC') } ORDER BY id",
+		// toDate of a time before 1970 wraps around to 2079.
+		"SELECT id FROM payments WHERE toDate(paid_at) >= toDate({since:DateTime64(6, 'UTC')}) ORDER BY id",
 	} {
 		ch := chCheck(query)
 		ch.Window = 24 * time.Hour

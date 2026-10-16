@@ -182,9 +182,11 @@ func (c *clickhouse) post(ctx context.Context, query string, settings url.Values
 	return resp, nil
 }
 
-// chMinTime is the earliest DateTime64. A full pass sends it as the start of the
-// window: no Date, DateTime or DateTime64 value is earlier.
-var chMinTime = time.Date(1900, 1, 1, 0, 0, 0, 0, time.UTC)
+// chMinTime is the start of the window on a full pass: the zero DateTime and
+// DateTime64, and the earliest Date. Not 1900, the earliest DateTime64:
+// toDate() of a time before 1970 wraps around to 2079, and a full pass of a
+// query with toDate({since:...}) would read nothing.
+var chMinTime = time.Unix(0, 0).UTC()
 
 // Query runs the check with readonly=2 and the check's timeout as
 // max_execution_time, or with readonly=1 alone when the user's profile allows no
