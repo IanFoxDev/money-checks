@@ -88,7 +88,7 @@ func readSide(ctx context.Context, ch config.Check, name string, get func(string
 		return fmt.Errorf("%s: %w", name, err)
 	}
 	rows := 0
-	err = src.Query(ctx, side, c.res.Since, func(row source.Row) error {
+	err = src.Query(ctx, side, c.res.Since, c.res.Until, func(row source.Row) error {
 		rows++
 		if rows > cmp.MaxRows {
 			return fmt.Errorf("more than max_rows (%d) rows; a side returns one row per key, grouped in the query", cmp.MaxRows)

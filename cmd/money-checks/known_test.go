@@ -21,7 +21,7 @@ type rows struct {
 	err  error
 }
 
-func (s rows) Query(_ context.Context, _ config.Check, _ time.Time, each func(source.Row) error) error {
+func (s rows) Query(_ context.Context, _ config.Check, _, _ time.Time, each func(source.Row) error) error {
 	for _, r := range s.rows {
 		if err := each(r); err != nil {
 			return err

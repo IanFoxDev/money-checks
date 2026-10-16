@@ -73,7 +73,7 @@ func pgCheck(query string) config.Check {
 func collect(t *testing.T, src Source, ch config.Check) ([]Row, error) {
 	t.Helper()
 	var rows []Row
-	err := src.Query(context.Background(), ch, time.Time{}, func(r Row) error {
+	err := src.Query(context.Background(), ch, time.Time{}, time.Time{}, func(r Row) error {
 		rows = append(rows, r)
 		return nil
 	})
@@ -173,7 +173,7 @@ func TestPostgresWindow(t *testing.T) {
 		ch.Window = 24 * time.Hour
 		ids := func(since time.Time) string {
 			var got []string
-			err := src.Query(context.Background(), ch, since, func(r Row) error {
+			err := src.Query(context.Background(), ch, since, time.Time{}, func(r Row) error {
 				got = append(got, r.Values[0].(string))
 				return nil
 			})
@@ -212,7 +212,7 @@ func TestPostgresStopsOnCallbackError(t *testing.T) {
 	s := pgSchema(t)
 	stop := errors.New("stop")
 	n := 0
-	err := openPG(t).Query(context.Background(), pgCheck("select id from "+s+".payments"), time.Time{}, func(Row) error {
+	err := openPG(t).Query(context.Background(), pgCheck("select id from "+s+".payments"), time.Time{}, time.Time{}, func(Row) error {
 		n++
 		return stop
 	})
@@ -238,4 +238,35 @@ func skipWithoutDB(t *testing.T, msg string) {
 		t.Fatal(msg)
 	}
 	t.Skip(msg)
+}
+
+// settle: the end of the rows is $2, and $1 is sent even without a window.
+func TestPostgresUntil(t *testing.T) {
+	pgSchema(t)
+	src := openPG(t)
+	ch := pgCheck(`select id from (values
+		('old', timestamptz '2026-10-01 00:00:00+00'),
+		('new', timestamptz '2026-10-08 05:00:00+00'),
+		('fresh', timestamptz '2026-10-08 05:55:00+00')
+	) v(id, at) where at >= $1 and at < $2 order by id`)
+	ch.Settle = 15 * time.Minute
+	until := time.Date(2026, 10, 8, 8, 45, 0, 0, time.FixedZone("CYT", 3*3600))
+	for _, tc := range []struct {
+		window time.Duration
+		since  time.Time
+		want   string
+	}{
+		{0, time.Time{}, "new,old"},
+		{24 * time.Hour, time.Date(2026, 10, 7, 6, 0, 0, 0, time.UTC), "new"},
+	} {
+		ch.Window = tc.window
+		var got []string
+		err := src.Query(context.Background(), ch, tc.since, until, func(r Row) error {
+			got = append(got, r.Values[0].(string))
+			return nil
+		})
+		if err != nil || strings.Join(got, ",") != tc.want {
+			t.Errorf("window %s: %q, %v; want %q", tc.window, got, err, tc.want)
+		}
+	}
 }

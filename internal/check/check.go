@@ -62,6 +62,10 @@ type Result struct {
 	Scope  Scope
 	Since  time.Time
 	Window time.Duration
+	// Until, when set, is the end of the rows a compare check with settle read:
+	// newer rows are still on their way from one side to the other.
+	Until  time.Time
+	Settle time.Duration
 
 	// Known violations: rows listed in the known file, with their reasons. They do
 	// not count towards Violations or the status.
@@ -148,6 +152,9 @@ func Run(ctx context.Context, cfg config.Config, scope Scope, open Opener, now f
 		if scope == Window && ch.Window > 0 {
 			res.Scope, res.Since, res.Window = Window, r.StartedAt.Add(-ch.Window), ch.Window
 		}
+		if ch.Settle > 0 {
+			res.Until, res.Settle = r.StartedAt.Add(-ch.Settle), ch.Settle
+		}
 		c := &collector{cur: cfg.Money, ch: ch, known: cfg.Known[ch.Name], at: r.StartedAt, res: &res}
 		var err error
 		if ch.Compare != nil {
@@ -172,7 +179,7 @@ func Run(ctx context.Context, cfg config.Config, scope Scope, open Opener, now f
 
 func runOne(ctx context.Context, ch config.Check, src source.Source, c *collector) error {
 	var rows int64
-	err := src.Query(ctx, ch, c.res.Since, func(row source.Row) error {
+	err := src.Query(ctx, ch, c.res.Since, time.Time{}, func(row source.Row) error {
 		rows++
 		id, ok := row.Get(ch.ID)
 		if !ok {

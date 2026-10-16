@@ -62,8 +62,9 @@ func (d Decimal) String() string {
 type Source interface {
 	// Query runs the check and calls each for every row, in the order the database
 	// returns them. It stops at the first error each returns. A check with a
-	// window gets since as its parameter; the zero time reads every row.
-	Query(ctx context.Context, ch config.Check, since time.Time, each func(Row) error) error
+	// window gets since as its parameter; the zero time reads every row. A check
+	// with settle gets until as well, the end of the rows that have settled.
+	Query(ctx context.Context, ch config.Check, since, until time.Time, each func(Row) error) error
 	Close(ctx context.Context) error
 }
 

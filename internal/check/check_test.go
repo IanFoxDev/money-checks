@@ -17,16 +17,17 @@ import (
 // fake returns the rows set for each check name, or the error.
 type fake struct {
 	since  map[string]time.Time // what each check got
+	until  map[string]time.Time
 	rows   map[string][]source.Row
 	errs   map[string]error
 	closed bool
 }
 
-func (f *fake) Query(_ context.Context, ch config.Check, since time.Time, each func(source.Row) error) error {
+func (f *fake) Query(_ context.Context, ch config.Check, since, until time.Time, each func(source.Row) error) error {
 	if f.since == nil {
-		f.since = map[string]time.Time{}
+		f.since, f.until = map[string]time.Time{}, map[string]time.Time{}
 	}
-	f.since[ch.Name] = since
+	f.since[ch.Name], f.until[ch.Name] = since, until
 	if err := f.errs[ch.Name]; err != nil {
 		return err
 	}

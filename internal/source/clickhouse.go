@@ -188,11 +188,15 @@ func (c *clickhouse) post(ctx context.Context, query string, settings url.Values
 // query with toDate({since:...}) would read nothing.
 var chMinTime = time.Unix(0, 0).UTC()
 
+// chTimeFormat is how a DateTime64(6, 'UTC') parameter is written.
+const chTimeFormat = "2006-01-02 15:04:05.000000"
+
 // Query runs the check with readonly=2 and the check's timeout as
 // max_execution_time, or with readonly=1 alone when the user's profile allows no
 // settings. Values come back as text, as from PostgreSQL; \N is nil. A check with
-// a window gets since as the server parameter {since:DateTime64(6, 'UTC')}.
-func (c *clickhouse) Query(ctx context.Context, ch config.Check, since time.Time, each func(Row) error) error {
+// a window gets since as the server parameter {since:DateTime64(6, 'UTC')}, a
+// check with settle gets until as {until:DateTime64(6, 'UTC')}.
+func (c *clickhouse) Query(ctx context.Context, ch config.Check, since, until time.Time, each func(Row) error) error {
 	ctx, cancel := context.WithTimeout(ctx, ch.Timeout)
 	defer cancel()
 	settings := url.Values{}
@@ -210,7 +214,10 @@ func (c *clickhouse) Query(ctx context.Context, ch config.Check, since time.Time
 		if since.Before(chMinTime) {
 			since = chMinTime
 		}
-		settings.Set("param_since", since.Format("2006-01-02 15:04:05.000000"))
+		settings.Set("param_since", since.Format(chTimeFormat))
+	}
+	if ch.Settle > 0 {
+		settings.Set("param_until", until.UTC().Format(chTimeFormat))
 	}
 	resp, err := c.post(ctx, ch.Query, settings)
 	if err != nil {

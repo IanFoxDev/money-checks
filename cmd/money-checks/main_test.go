@@ -192,7 +192,7 @@ func skipWithoutDB(t *testing.T, msg string) {
 // since records the start each query got.
 type since struct{ got []time.Time }
 
-func (s *since) Query(_ context.Context, _ config.Check, at time.Time, _ func(source.Row) error) error {
+func (s *since) Query(_ context.Context, _ config.Check, at, _ time.Time, _ func(source.Row) error) error {
 	s.got = append(s.got, at)
 	return nil
 }

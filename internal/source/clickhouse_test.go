@@ -272,7 +272,7 @@ func TestClickHouseWindow(t *testing.T) {
 		ch.Window = 24 * time.Hour
 		ids := func(src Source, since time.Time) string {
 			var got []string
-			err := src.Query(context.Background(), ch, since, func(r Row) error {
+			err := src.Query(context.Background(), ch, since, time.Time{}, func(r Row) error {
 				got = append(got, r.Values[0].(string))
 				return nil
 			})
@@ -306,9 +306,58 @@ func TestClickHouseWindow(t *testing.T) {
 		time.Date(2026, 10, 13, 10, 0, 0, 123001000, time.UTC): 0,
 	} {
 		n := 0
-		err := src.Query(context.Background(), ch, since, func(Row) error { n++; return nil })
+		err := src.Query(context.Background(), ch, since, time.Time{}, func(Row) error { n++; return nil })
 		if err != nil || n != want {
 			t.Errorf("since %s: %d rows, %v; want %d", since.Format(time.RFC3339Nano), n, err, want)
+		}
+	}
+}
+
+// settle: the end of the rows is {until:...}, in UTC whatever the session zone, and
+// works under readonly=1.
+func TestClickHouseUntil(t *testing.T) {
+	a, db := chDatabase(t)
+	u, err := url.Parse(a.url)
+	if err != nil {
+		t.Fatal(err)
+	}
+	q := u.Query()
+	q.Set("session_timezone", "Asia/Nicosia")
+	u.RawQuery = q.Encode()
+	src, _, err := openCH(t, u.String(), db, false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, readonly := a.user(db, "SETTINGS readonly = 1", "SELECT")
+	ro, _, err := openCH(t, readonly, db, true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	// p1 is paid at 2026-10-13 10:00:00.123, p2 on 2026-10-01.
+	for _, tc := range []struct {
+		query  string
+		window time.Duration
+		until  time.Time
+		want   string
+	}{
+		{"SELECT id FROM payments WHERE paid_at < {until:DateTime64(6, 'UTC')} ORDER BY id", 0,
+			time.Date(2026, 10, 13, 10, 0, 0, 123001000, time.UTC), "p1,p2"},
+		{"SELECT id FROM payments WHERE paid_at < {until:DateTime64(6, 'UTC')} ORDER BY id", 0,
+			time.Date(2026, 10, 13, 13, 0, 0, 123000000, time.FixedZone("CYT", 3*3600)), "p2"},
+		{"SELECT id FROM payments WHERE paid_at >= {since:DateTime64(6, 'UTC')} AND paid_at < {until:DateTime64(6, 'UTC')} ORDER BY id", 24 * time.Hour,
+			time.Date(2026, 10, 14, 0, 0, 0, 0, time.UTC), "p1"},
+	} {
+		ch := chCheck(tc.query)
+		ch.Window, ch.Settle = tc.window, 15*time.Minute
+		for _, s := range []Source{src, ro} {
+			var got []string
+			err := s.Query(context.Background(), ch, time.Date(2026, 10, 13, 0, 0, 0, 0, time.UTC), tc.until, func(r Row) error {
+				got = append(got, r.Values[0].(string))
+				return nil
+			})
+			if err != nil || strings.Join(got, ",") != tc.want {
+				t.Errorf("%s, until %s: %q, %v; want %q", tc.query, tc.until, got, err, tc.want)
+			}
 		}
 	}
 }

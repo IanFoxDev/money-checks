@@ -118,8 +118,9 @@ func (a connectionAuth) writeProblem(database string) string {
 // Query runs the pipeline with the check's timeout as the context deadline, which
 // the driver also sends as maxTimeMS, so the server stops the work when the check
 // times out. The read preference is the URI's. A check with a window gets since as
-// the variable $$since (let, MongoDB 5.0 and later).
-func (m *mongodb) Query(ctx context.Context, ch config.Check, since time.Time, each func(Row) error) error {
+// the variable $$since (let, MongoDB 5.0 and later), a check with settle gets until
+// as $$until.
+func (m *mongodb) Query(ctx context.Context, ch config.Check, since, until time.Time, each func(Row) error) error {
 	pipeline, err := Pipeline(&ch.Pipeline)
 	if err != nil {
 		return err
@@ -134,8 +135,15 @@ func (m *mongodb) Query(ctx context.Context, ch config.Check, since time.Time, e
 		{Key: "cursor", Value: bson.D{}},
 		{Key: "comment", Value: "money-checks: " + ch.Name},
 	}
+	var let bson.D
 	if ch.Window > 0 {
-		cmd = append(cmd, bson.E{Key: "let", Value: bson.D{{Key: "since", Value: bson.NewDateTimeFromTime(since)}}})
+		let = append(let, bson.E{Key: "since", Value: bson.NewDateTimeFromTime(since)})
+	}
+	if ch.Settle > 0 {
+		let = append(let, bson.E{Key: "until", Value: bson.NewDateTimeFromTime(until)})
+	}
+	if len(let) > 0 {
+		cmd = append(cmd, bson.E{Key: "let", Value: let})
 	}
 	opts := options.RunCmd()
 	if m.readPref != nil {

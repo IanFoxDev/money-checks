@@ -24,7 +24,7 @@ type script struct {
 	since []time.Time // what each run got
 }
 
-func (s *script) Query(_ context.Context, _ config.Check, since time.Time, each func(source.Row) error) error {
+func (s *script) Query(_ context.Context, _ config.Check, since, _ time.Time, each func(source.Row) error) error {
 	s.since = append(s.since, since)
 	rows := s.runs[s.n]
 	s.n++

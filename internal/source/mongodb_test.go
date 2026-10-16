@@ -343,7 +343,7 @@ func TestMongoDBWindow(t *testing.T) {
 	ch.Collection, ch.Window = "renewals", 24*time.Hour
 	ids := func(since time.Time) string {
 		var got []string
-		err := src.Query(ctx, ch, since, func(r Row) error {
+		err := src.Query(ctx, ch, since, time.Time{}, func(r Row) error {
 			got = append(got, r.Values[0].(string))
 			return nil
 		})
@@ -357,5 +357,48 @@ func TestMongoDBWindow(t *testing.T) {
 	}
 	if got := ids(time.Time{}); got != "new,old" {
 		t.Errorf("full: %q", got)
+	}
+}
+
+// settle: the end of the rows is $$until, with or without $$since.
+func TestMongoDBUntil(t *testing.T) {
+	db, admin, reader := mongoDB(t)
+	ctx := context.Background()
+	client, err := mongo.Connect(options.Client().ApplyURI(admin))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = client.Disconnect(ctx) }()
+	_, err = client.Database(db).Collection("renewals").InsertMany(ctx, []any{
+		bson.D{{Key: "_id", Value: "old"}, {Key: "paid_at", Value: bson.NewDateTimeFromTime(time.Date(2026, 10, 1, 0, 0, 0, 0, time.UTC))}},
+		bson.D{{Key: "_id", Value: "new"}, {Key: "paid_at", Value: bson.NewDateTimeFromTime(time.Date(2026, 10, 8, 5, 0, 0, 0, time.UTC))}},
+		bson.D{{Key: "_id", Value: "fresh"}, {Key: "paid_at", Value: bson.NewDateTimeFromTime(time.Date(2026, 10, 8, 5, 55, 0, 0, time.UTC))}},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	src, _, err := openMongo(t, db, reader, true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	until := time.Date(2026, 10, 8, 5, 45, 0, 0, time.UTC)
+	for _, tc := range []struct {
+		pipeline string
+		window   time.Duration
+		want     string
+	}{
+		{`[{$match: {$expr: {$lt: ["$paid_at", "$$until"]}}}, {$sort: {_id: 1}}]`, 0, "new,old"},
+		{`[{$match: {$expr: {$and: [{$gte: ["$paid_at", "$$since"]}, {$lt: ["$paid_at", "$$until"]}]}}}, {$sort: {_id: 1}}]`, 24 * time.Hour, "new"},
+	} {
+		ch := mongoCheck(t, tc.pipeline)
+		ch.Collection, ch.Window, ch.Settle = "renewals", tc.window, 15*time.Minute
+		var got []string
+		err := src.Query(ctx, ch, time.Date(2026, 10, 7, 6, 0, 0, 0, time.UTC), until, func(r Row) error {
+			got = append(got, r.Values[0].(string))
+			return nil
+		})
+		if err != nil || strings.Join(got, ",") != tc.want {
+			t.Errorf("%s: %q, %v; want %q", tc.pipeline, got, err, tc.want)
+		}
 	}
 }

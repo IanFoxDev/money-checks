@@ -43,8 +43,9 @@ func openPostgres(ctx context.Context, p config.Postgres) (*postgres, error) {
 // Query runs the check in its own READ ONLY transaction with the check's timeout
 // as statement_timeout, and rolls it back. Values come back as text, so numeric and
 // float8 are never read through a Go float; NULL is nil. A check with a window gets
-// since as $1.
-func (p *postgres) Query(ctx context.Context, ch config.Check, since time.Time, each func(Row) error) error {
+// since as $1. A check with settle gets until as $2, and since as $1 even without
+// a window, because PostgreSQL cannot type $2 alone.
+func (p *postgres) Query(ctx context.Context, ch config.Check, since, until time.Time, each func(Row) error) error {
 	ctx, cancel := context.WithTimeout(ctx, ch.Timeout)
 	defer cancel()
 	tx, err := p.pool.BeginTx(ctx, pgx.TxOptions{AccessMode: pgx.ReadOnly})
@@ -56,9 +57,12 @@ func (p *postgres) Query(ctx context.Context, ch config.Check, since time.Time, 
 		return err
 	}
 	args := []any{pgx.QueryResultFormats{pgx.TextFormatCode}}
-	if ch.Window > 0 {
+	if ch.Window > 0 || ch.Settle > 0 {
 		// A bind parameter, never text in the query.
 		args = append(args, since.UTC())
+	}
+	if ch.Settle > 0 {
+		args = append(args, until.UTC())
 	}
 	rows, err := tx.Query(ctx, ch.Query, args...)
 	if err != nil {
