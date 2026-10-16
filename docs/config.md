@@ -183,9 +183,22 @@ compared with (`timestamptz` or `timestamp`, in UTC). On MongoDB it is the varia
       - $match: {$expr: {$gte: ["$paid_at", "$$since"]}}
 ```
 
+On ClickHouse it is the query parameter `{since:DateTime64(6, 'UTC')}`, exactly this
+type: another one reads the start in the server's time zone or drops the
+microseconds, so the configuration check refuses it.
+
+```yaml
+    query: |
+      select day, sum(amount) as amount, currency
+      from daily_purchases
+      where day >= toDate({since:DateTime64(6, 'UTC')})
+      group by day, currency
+```
+
 Nothing is put into the text of the query. On a full pass the start is
-`0001-01-01T00:00:00Z`, so the same query reads every row. A check with `window`
-must use the parameter, and a pipeline that uses `$$since` must have a `window`.
+`0001-01-01T00:00:00Z` (`1970-01-01` on ClickHouse, so that `toDate()` of it does
+not wrap around), so the same query reads every row. A check with `window` must use the parameter, and a
+query or pipeline that uses it must have a `window`.
 `window` is at least `serve.interval`, or rows written between two runs would wait
 for the next full pass. Hours are the largest unit: a week is `168h`.
 

@@ -16,6 +16,9 @@ configuration, the report format or the metric names; such changes are marked
   run unless `require_read_only: false`. A user whose profile sets `readonly=1` is
   accepted with a warning about the timeout. Values come back as text. See
   `docs/adr/0003-clickhouse.md`.
+- `window` for ClickHouse checks: the query gets the start of the window as
+  `{since:DateTime64(6, 'UTC')}`, sent as a server parameter. Another type for
+  `since` is a configuration error.
 
 ## [0.2.0] - 2026-10-12
 

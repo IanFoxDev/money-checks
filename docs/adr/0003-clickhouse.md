@@ -69,7 +69,16 @@ that the credentials are wider than they need to be.
 
 **A window is a server-side parameter.** The query uses
 `{since:DateTime64(6, 'UTC')}` and the start of the window goes in `param_since`. It
-is never put into the query text.
+is never put into the query text. The value is UTC text with microseconds,
+`2026-10-07 06:00:00.123456`; the server accepts the parameter under `readonly=1` too.
+The type is fixed in the configuration check: with `{since:DateTime64(6)}` the server
+reads the text in its own time zone and the window moves by hours without an error,
+and `{since:DateTime}` refuses the microseconds. A full pass sends
+`1970-01-01 00:00:00.000000`, the zero `DateTime` and `DateTime64` and the earliest
+`Date`. The earliest `DateTime64` is 1900, but `toDate()` of a time before 1970 wraps
+around to 2079: with 1900, a full pass of `day >= toDate({since:...})` would read no
+rows and report no violations. A `Date32` or `DateTime64` value before 1970 is left
+out of a full pass; money tables do not have them.
 
 **Values stay text, as on PostgreSQL.** `\N` is nil, everything else is the string
 ClickHouse printed, with the TabSeparated escapes undone. An amount is parsed from that
