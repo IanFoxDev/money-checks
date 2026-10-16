@@ -5,6 +5,7 @@ import (
 	"math"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/ianfoxdev/money-checks/internal/config"
 	"github.com/ianfoxdev/money-checks/internal/source"
@@ -189,5 +190,21 @@ func TestSub(t *testing.T) {
 		if ok != tc.ok || ok && d != tc.a-tc.b {
 			t.Errorf("sub(%d, %d) = %d, %v", tc.a, tc.b, d, ok)
 		}
+	}
+}
+
+// Both sides read the same window.
+func TestCompareWindow(t *testing.T) {
+	yaml := strings.Replace(compareConf, "  - name: daily\n", "  - name: daily\n    window: 72h\n", 1)
+	yaml = strings.Replace(yaml, "pipeline: [{$match: {a: 1}}]", `pipeline: [{$match: {$expr: {$gte: ["$at", "$$since"]}}}]`, 1)
+	yaml = strings.Replace(yaml, "query: q}", "query: \"select {since:DateTime64(6, 'UTC')}\"}", 1)
+	f := &fake{rows: compareRows()}
+	r := runScope(t, load(t, yaml), Window, f)
+	want := r.StartedAt.Add(-72 * time.Hour)
+	if res := r.Results[0]; res.Scope != Window || !res.Since.Equal(want) || len(res.Resolved) != 0 {
+		t.Errorf("scope %s, since %s", res.Scope, res.Since)
+	}
+	if !f.since["daily left"].Equal(want) || !f.since["daily right"].Equal(want) {
+		t.Errorf("left got %s, right got %s, want %s", f.since["daily left"], f.since["daily right"], want)
 	}
 }
