@@ -415,6 +415,13 @@ func (c *Config) checkCheck(where string, ch Check) []error {
 		case src.ClickHouse != nil && ch.Window == 0 && since:
 			add("query: {since:...} is the start of the window; set window")
 		}
+		if src.ClickHouse != nil {
+			for _, m := range clickhouseSinceType.FindAllStringSubmatch(ch.Query, -1) {
+				if strings.Join(strings.Fields(m[1]), "") != "DateTime64(6,'UTC')" {
+					add("query: write {since:DateTime64(6, 'UTC')}, not {since:%s}: another type drops the microseconds or reads the start of the window in the server time zone", strings.TrimSpace(m[1]))
+				}
+			}
+		}
 	}
 	if a := ch.Amount; a != nil {
 		if a.Field == "" {
@@ -446,6 +453,9 @@ func (c *Config) checkCheck(where string, ch Check) []error {
 
 // clickhouseSince finds the window parameter in a ClickHouse query.
 var clickhouseSince = regexp.MustCompile(`\{\s*since\s*:`)
+
+// clickhouseSinceType finds the type the query gives the window parameter.
+var clickhouseSinceType = regexp.MustCompile(`\{\s*since\s*:([^}]*)\}`)
 
 // writeStages change data. A check must never run them.
 var writeStages = map[string]bool{"$out": true, "$merge": true}

@@ -261,6 +261,8 @@ sources:
 checks:
   - {name: ch_no_since, source: stats, query: select 1 as id, id: id, window: 24h}
   - {name: ch_no_window, source: stats, query: "select 1 as id where now() > {since:DateTime64(6, 'UTC')}", id: id}
+  - {name: ch_zone, source: stats, query: "select 1 as id where now() > {since:DateTime64(6)}", id: id, window: 24h}
+  - {name: ch_seconds, source: stats, query: "select 1 as id where now() > { since : DateTime('UTC') }", id: id, window: 24h}
   - {name: no_since, source: billing, collection: c, window: 24h, pipeline: [{$match: {a: 1}}]}
   - {name: no_window, source: billing, collection: c, pipeline: [{$match: {$expr: {$gte: ["$at", "$$since"]}}}]}
   - {name: no_param, source: ledger, query: select 1, id: id, window: 24h}
@@ -278,6 +280,8 @@ serve: {interval: 1h, full_every: 30m}
 		"check no_param: window: the query must compare a time column with $1",
 		"check ch_no_since: window: the query must compare a time column with {since:DateTime64(6, 'UTC')}",
 		"check ch_no_window: query: {since:...} is the start of the window; set window",
+		"check ch_zone: query: write {since:DateTime64(6, 'UTC')}, not {since:DateTime64(6)}",
+		"check ch_seconds: query: write {since:DateTime64(6, 'UTC')}, not {since:DateTime('UTC')}",
 		"check short: window: at least serve.interval (1h0m0s), got 30m0s",
 		"check negative: window: must be positive",
 		"serve.full_every: at least serve.interval (1h0m0s), got 30m0s",
