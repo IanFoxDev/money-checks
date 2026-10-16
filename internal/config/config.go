@@ -108,6 +108,11 @@ type Check struct {
 	// query gets the start of the window as $1 (postgres), $$since (mongodb) or
 	// {since:DateTime64(6, 'UTC')} (clickhouse).
 	Window time.Duration `yaml:"window"`
+	// Settle, on a compare check, leaves out the rows of the last Settle on both
+	// sides, which are still on their way from one to the other: the query gets
+	// the end as $2 (postgres), $$until (mongodb) or {until:DateTime64(6, 'UTC')}
+	// (clickhouse).
+	Settle time.Duration `yaml:"settle"`
 
 	// Compare, when set, replaces source, the query and id: the check reads
 	// totals from two sides and reports the keys where they differ.
@@ -151,7 +156,7 @@ func (ch Check) Side(name string) Check {
 	return Check{
 		Name: ch.Name + " " + name, Source: s.Source, Severity: ch.Severity,
 		Collection: s.Collection, Pipeline: s.Pipeline, Query: s.Query,
-		Timeout: ch.Timeout, Window: ch.Window, Samples: ch.Samples,
+		Timeout: ch.Timeout, Window: ch.Window, Settle: ch.Settle, Samples: ch.Samples,
 	}
 }
 
@@ -442,6 +447,14 @@ func (c *Config) checkCheck(where string, ch Check) []error {
 	if n := *ch.Samples; n < 0 || n > MaxSamples {
 		add("samples: want 0..%d, got %d", MaxSamples, n)
 	}
+	switch {
+	case ch.Settle < 0:
+		add("settle: must be positive")
+	case ch.Settle > 0 && ch.Compare == nil:
+		add("settle: only a compare check has it; a check of one database sees its rows as they are written")
+	case ch.Settle > 0 && ch.Window > 0 && ch.Settle >= ch.Window:
+		add("settle: shorter than window (%s), got %s", ch.Window, ch.Settle)
+	}
 	if ch.Compare != nil {
 		return append(errs, c.checkCompare(where, ch)...)
 	}
@@ -486,6 +499,12 @@ func (c *Config) checkQuery(ch Check, needID bool, add func(string, ...any)) {
 		case ch.Window == 0 && since:
 			add("pipeline: $$since is the start of the window; set window")
 		}
+		switch until := hasValue(&ch.Pipeline, "$$until"); {
+		case ch.Settle > 0 && !until:
+			add("settle: the pipeline must compare a time field with $$until, the end of the rows that have settled, inside $expr")
+		case ch.Settle == 0 && until:
+			add("pipeline: $$until is the end of the rows that have settled; set settle")
+		}
 	default:
 		if ch.Collection != "" || ch.Pipeline.Kind != 0 {
 			add("collection and pipeline are for mongodb sources; %s is %s, use query", ch.Source, src.Kind())
@@ -496,7 +515,7 @@ func (c *Config) checkQuery(ch Check, needID bool, add func(string, ...any)) {
 		if needID && ch.ID == "" {
 			add("id: the column that identifies a violating row")
 		}
-		switch since := clickhouseSince.MatchString(ch.Query); {
+		switch since := clickhouseParam("since").MatchString(ch.Query); {
 		case src.Postgres != nil && ch.Window > 0 && !strings.Contains(ch.Query, "$1"):
 			add("window: the query must compare a time column with $1, the start of the window")
 		case src.ClickHouse != nil && ch.Window > 0 && !since:
@@ -504,10 +523,23 @@ func (c *Config) checkQuery(ch Check, needID bool, add func(string, ...any)) {
 		case src.ClickHouse != nil && ch.Window == 0 && since:
 			add("query: {since:...} is the start of the window; set window")
 		}
+		switch until := clickhouseParam("until").MatchString(ch.Query); {
+		case src.Postgres != nil && ch.Settle > 0 && (!strings.Contains(ch.Query, "$2") || !strings.Contains(ch.Query, "$1")):
+			// PostgreSQL cannot type $2 when $1 is not used.
+			add("settle: the query must compare a time column with $2, the end of the rows that have settled, and with $1, the start of the window (0001-01-01 without a window)")
+		case src.Postgres != nil && ch.Settle == 0 && strings.Contains(ch.Query, "$2"):
+			add("query: $2 is the end of the rows that have settled; set settle")
+		case src.ClickHouse != nil && ch.Settle > 0 && !until:
+			add("settle: the query must compare a time column with {until:DateTime64(6, 'UTC')}, the end of the rows that have settled")
+		case src.ClickHouse != nil && ch.Settle == 0 && until:
+			add("query: {until:...} is the end of the rows that have settled; set settle")
+		}
 		if src.ClickHouse != nil {
-			for _, m := range clickhouseSinceType.FindAllStringSubmatch(ch.Query, -1) {
-				if strings.Join(strings.Fields(m[1]), "") != "DateTime64(6,'UTC')" {
-					add("query: write {since:DateTime64(6, 'UTC')}, not {since:%s}: another type drops the microseconds or reads the start of the window in the server time zone", strings.TrimSpace(m[1]))
+			for _, name := range []string{"since", "until"} {
+				for _, m := range clickhouseParamType(name).FindAllStringSubmatch(ch.Query, -1) {
+					if strings.Join(strings.Fields(m[1]), "") != "DateTime64(6,'UTC')" {
+						add("query: write {%s:DateTime64(6, 'UTC')}, not {%s:%s}: another type drops the microseconds or reads the time in the server time zone", name, name, strings.TrimSpace(m[1]))
+					}
 				}
 			}
 		}
@@ -597,11 +629,15 @@ func (c *Config) checkCompare(where string, ch Check) []error {
 	return errs
 }
 
-// clickhouseSince finds the window parameter in a ClickHouse query.
-var clickhouseSince = regexp.MustCompile(`\{\s*since\s*:`)
+// clickhouseParam finds a parameter, since or until, in a ClickHouse query.
+func clickhouseParam(name string) *regexp.Regexp {
+	return regexp.MustCompile(`\{\s*` + name + `\s*:`)
+}
 
-// clickhouseSinceType finds the type the query gives the window parameter.
-var clickhouseSinceType = regexp.MustCompile(`\{\s*since\s*:([^}]*)\}`)
+// clickhouseParamType finds the types the query gives a parameter.
+func clickhouseParamType(name string) *regexp.Regexp {
+	return regexp.MustCompile(`\{\s*` + name + `\s*:([^}]*)\}`)
+}
 
 // writeStages change data. A check must never run them.
 var writeStages = map[string]bool{"$out": true, "$merge": true}

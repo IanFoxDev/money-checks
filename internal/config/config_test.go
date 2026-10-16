@@ -400,3 +400,105 @@ checks:
 		t.Errorf("missing side file: %v", err)
 	}
 }
+
+func TestParseSettle(t *testing.T) {
+	ok := `
+version: 1
+sources:
+  billing: {mongodb: {uri_env: A, database: shop}}
+  ledger: {postgres: {dsn_env: B}}
+  stats: {clickhouse: {url_env: C, database: stats}}
+checks:
+  - name: three_sides
+    window: 72h
+    settle: 15m
+    compare:
+      left:
+        source: billing
+        collection: purchases
+        pipeline:
+          - $match: {$expr: {$and: [{$gte: ["$paid_at", "$$since"]}, {$lt: ["$paid_at", "$$until"]}]}}
+      right: {source: stats, query: "select 1 where now() >= {since:DateTime64(6, 'UTC')} and now() < { until : DateTime64(6, 'UTC') }"}
+      key: [day]
+  - name: no_window
+    settle: 15m
+    compare:
+      left: {source: ledger, query: select 1 where now() >= $1 and now() < $2}
+      right: {source: stats, query: "select 1 where now() < {until:DateTime64(6, 'UTC')}"}
+      key: [day]
+serve: {interval: 10m}
+`
+	c, err := Parse([]byte(ok), ".")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if c.Checks[0].Settle != 15*time.Minute || c.Checks[0].Side("right").Settle != 15*time.Minute {
+		t.Errorf("settle %s", c.Checks[0].Settle)
+	}
+
+	bad := `
+version: 1
+sources:
+  billing: {mongodb: {uri_env: A, database: shop}}
+  ledger: {postgres: {dsn_env: B}}
+  stats: {clickhouse: {url_env: C, database: stats}}
+checks:
+  - {name: plain, source: ledger, query: select 1, id: id, settle: 15m}
+  - name: no_until
+    settle: 15m
+    compare:
+      left: {source: billing, collection: c, pipeline: [{$match: {a: 1}}]}
+      right: {source: stats, query: select 1}
+      key: [day]
+  - name: pg_only_two
+    settle: 15m
+    compare:
+      left: {source: ledger, query: select 1 where now() < $2}
+      right: {source: stats, query: "select 1 where now() < {until:DateTime(UTC)}"}
+      key: [day]
+  - name: no_settle
+    compare:
+      left: {source: ledger, query: select 1 where now() < $2}
+      right: {source: stats, query: "select 1 where now() < {until:DateTime64(6, 'UTC')}"}
+      key: [day]
+  - name: mongo_no_settle
+    compare:
+      left: {source: billing, collection: c, pipeline: [{$match: {$expr: {$lt: ["$at", "$$until"]}}}]}
+      right: {source: stats, query: select 1}
+      key: [day]
+  - name: too_long
+    window: 1h
+    settle: 1h
+    compare:
+      left: {source: ledger, query: select 1 where now() >= $1 and now() < $2}
+      right: {source: ledger, query: select 1 where now() >= $1 and now() < $2}
+      key: [day]
+  - name: negative
+    settle: -1m
+    compare:
+      left: {source: ledger, query: select 1}
+      right: {source: ledger, query: select 1}
+      key: [day]
+serve: {interval: 10m}
+`
+	_, err = Parse([]byte(bad), ".")
+	if err == nil {
+		t.Fatal("no error")
+	}
+	for _, want := range []string{
+		"check plain: settle: only a compare check has it",
+		"check no_until: compare.left: settle: the pipeline must compare a time field with $$until",
+		"check no_until: compare.right: settle: the query must compare a time column with {until:DateTime64(6, 'UTC')}",
+		"check pg_only_two: compare.left: settle: the query must compare a time column with $2, the end of the rows that have settled, and with $1",
+		"check pg_only_two: compare.right: query: write {until:DateTime64(6, 'UTC')}, not {until:DateTime(UTC)}",
+		"check no_settle: compare.left: query: $2 is the end of the rows that have settled; set settle",
+		"check no_settle: compare.right: query: {until:...} is the end of the rows that have settled; set settle",
+		"check mongo_no_settle: compare.left: pipeline: $$until is the end of the rows that have settled; set settle",
+		"check too_long: settle: shorter than window (1h0m0s), got 1h0m0s",
+		"check negative: settle: must be positive",
+	} {
+		if !strings.Contains(err.Error(), want) {
+			t.Errorf("missing %q in:\n%v", want, err)
+		}
+	}
+}
