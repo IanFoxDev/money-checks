@@ -1,5 +1,6 @@
 # Money invariants of a small subscription shop. Payments, subscriptions and
-# wallets live in MongoDB; the double-entry ledger lives in PostgreSQL.
+# wallets live in MongoDB; the double-entry ledger lives in PostgreSQL; daily
+# payment totals for dashboards and payouts live in ClickHouse.
 # Every check returns the rows that break the invariant; a clean shop returns none.
 version: 1
 defaults:
@@ -12,6 +13,10 @@ sources:
   ledger:
     postgres:
       dsn_env: LEDGER_PG_DSN
+  stats:
+    clickhouse:
+      url_env: STATS_CLICKHOUSE_URL
+      database: stats
 
 checks:
   - name: two_renewals_in_one_period
@@ -145,3 +150,31 @@ checks:
       order by 1
     id: id
     amount: {field: balance, unit: minor, currency_field: currency}
+
+  - name: payments_reach_stats
+    description: Every successful payment is in the daily statistics, once.
+    # Payments of the last 15 minutes may still be on their way to ClickHouse, and
+    # today's row there is partial: both sides compare whole days before that.
+    settle: 15m
+    compare:
+      left:
+        source: shop
+        collection: payments
+        pipeline:
+          - $match: {status: succeeded, kind: {$ne: refund}}
+          - $match: {$expr: {$lt: ["$created_at", {$dateTrunc: {date: "$$until", unit: day}}]}}
+          - $group:
+              _id: {day: {$dateToString: {format: "%Y-%m-%d", date: "$created_at"}}, currency: "$currency"}
+              amount: {$sum: "$amount"}
+              payments: {$sum: 1}
+          - $project: {_id: 0, day: "$_id.day", currency: "$_id.currency", amount: {$round: ["$amount", 2]}, payments: 1}
+      right:
+        source: stats
+        query: |
+          select day, currency, sum(amount) as amount, sum(payments) as payments
+          from daily_payments
+          where day < toDate({until:DateTime64(6, 'UTC')})
+          group by day, currency
+      key: [day, currency]
+      amount: {field: amount, unit: major, currency_field: currency}
+      counts: [payments]

@@ -1,5 +1,6 @@
 {
   "negative_wallet_balance": {"status": "violations", "violations": 1, "totals": {"USD": "-3.00"}},
+  "payments_reach_stats": {"status": "violations", "violations": 3, "totals": {"USD": "113.99"}},
   "payment_without_subscription": {"status": "ok", "violations": 0, "totals": {}},
   "provider_txn_recorded_twice": {"status": "violations", "violations": 1, "totals": {"JPY": "1200"}},
   "refund_exceeds_payment": {"status": "violations", "violations": 1, "totals": {"USD": "11.00"}},
