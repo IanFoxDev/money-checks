@@ -169,9 +169,14 @@ func (st *state) change(res check.Result) string {
 
 func describe(res check.Result) string {
 	msg := "money-checks: " + res.Name + " found "
-	if res.Violations == 1 {
+	switch {
+	case res.RightSource != "" && res.Violations == 1:
+		msg += "1 key where " + res.Source + " and " + res.RightSource + " differ"
+	case res.RightSource != "":
+		msg += itoa(res.Violations) + " keys where " + res.Source + " and " + res.RightSource + " differ"
+	case res.Violations == 1:
 		msg += "1 violation"
-	} else {
+	default:
 		msg += itoa(res.Violations) + " violations"
 	}
 	for i, t := range res.Totals {

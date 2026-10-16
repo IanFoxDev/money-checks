@@ -12,6 +12,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/ianfoxdev/money-checks/internal/check"
 	"github.com/ianfoxdev/money-checks/internal/config"
 	"github.com/ianfoxdev/money-checks/internal/source"
 )
@@ -228,6 +229,21 @@ func TestDescribeSeveralCurrencies(t *testing.T) {
 	s.Cycle(context.Background())
 	if len(n.msgs) != 1 || n.msgs[0] != "money-checks: two_active_subscriptions found 3 violations (2.50 EUR, 1.01 USD) [error]" {
 		t.Errorf("%q", n.msgs)
+	}
+}
+
+func TestDescribeCompare(t *testing.T) {
+	res := check.Result{
+		Name: "purchases_reach_stats", Source: "billing", RightSource: "stats", Severity: "error", Violations: 2, Scope: check.Window,
+		Window: 72 * time.Hour, Totals: []check.Money{{Currency: "USD", Minor: 3200, Exponent: 2}},
+	}
+	want := "money-checks: purchases_reach_stats found 2 keys where billing and stats differ (32.00 USD) in the last 72h [error]"
+	if got := describe(res); got != want {
+		t.Errorf("%q", got)
+	}
+	res.Violations = 1
+	if got := describe(res); !strings.Contains(got, "found 1 key where billing and stats differ") {
+		t.Errorf("%q", got)
 	}
 }
 
