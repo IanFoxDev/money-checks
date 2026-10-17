@@ -25,10 +25,24 @@ jobs:
           cat out/report.md
           # Violations are planted, so money-checks must exit with 1.
           test "$code" -eq 1
-      - name: The report has exactly the planted violations
+      - name: The checks find exactly the planted violations
         run: |
-          diff <(jq -S '[.checks[] | {(.name): {status, violations, totals: ((.totals | map({(.currency): .amount}) | add) // {})}}] | add' out/report.json) \
-               <(jq -S . expected.json)
+          MC_UID=$(id -u) MC_GID=$(id -g) docker compose run --rm money-checks \
+            test -c /etc/money-checks/checks.yaml -t /etc/money-checks/tests.yaml
+      - name: A check that no longer sees its data fails
+        run: |
+          # As if the code started writing another status: the query and its
+          # expect match nothing. Without expect the check would pass.
+          sed '/name: payment_without_subscription/,/name: unbalanced_transactions/ s/status: succeeded/status: success/' \
+            checks.yaml > out/drift.yaml
+          set +e
+          MC_UID=$(id -u) MC_GID=$(id -g) docker compose run --rm money-checks \
+            run -c /out/drift.yaml --check payment_without_subscription > out/drift.md
+          code=$?
+          set -e
+          cat out/drift.md
+          test "$code" -eq 2
+          grep -q 'expect found 0, at least 1 required' out/drift.md
       - name: serve exposes the same numbers
         run: |
           docker compose up -d money-checks
