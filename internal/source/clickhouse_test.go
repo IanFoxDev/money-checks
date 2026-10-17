@@ -403,3 +403,28 @@ func TestUnescapeTSV(t *testing.T) {
 		}
 	}
 }
+
+func TestClickHouseExpect(t *testing.T) {
+	a, db := chDatabase(t)
+	_, readonly := a.user(db, "SETTINGS readonly = 1", "SELECT")
+	src, _, err := openCH(t, readonly, db, true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	ch := chCheck("SELECT id FROM payments WHERE paid_at >= {since:DateTime64(6, 'UTC')}")
+	ch.Window = 24 * time.Hour
+	for query, want := range map[string]string{
+		"SELECT count() FROM payments": "2",
+		"SELECT count() FROM payments WHERE paid_at >= {since:DateTime64(6, 'UTC')}": "1",
+	} {
+		ch.Expect = &config.Expect{Query: query}
+		var got []Row
+		err := src.Query(context.Background(), ch.ExpectCheck("clickhouse"), time.Date(2026, 10, 13, 0, 0, 0, 0, time.UTC), time.Time{}, func(r Row) error {
+			got = append(got, r)
+			return nil
+		})
+		if err != nil || len(got) != 1 || got[0].Values[0] != want {
+			t.Errorf("%s: %v, %v; want %s", query, got, err, want)
+		}
+	}
+}

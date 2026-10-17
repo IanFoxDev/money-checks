@@ -23,11 +23,11 @@ type total struct {
 // counts every key where the two differ; see docs/adr/0004-compare.md. The
 // violations are sorted by key, so the samples do not depend on the order the
 // databases return rows in.
-func runCompare(ctx context.Context, ch config.Check, get func(string) (source.Source, error), c *collector) error {
+func runCompare(ctx context.Context, ch config.Check, kind func(string) string, get func(string) (source.Source, error), c *collector) error {
 	cmp := ch.Compare
 	c.abs = true
 	left := map[string]total{}
-	err := readSide(ctx, ch, "left", get, c, func(key string, t total) error {
+	err := readSide(ctx, ch, "left", kind, get, c, func(key string, t total) error {
 		if _, dup := left[key]; dup {
 			return fmt.Errorf("key %s is returned twice; group the rows by the key", key)
 		}
@@ -39,7 +39,7 @@ func runCompare(ctx context.Context, ch config.Check, get func(string) (source.S
 	}
 	var found []Sample
 	seen := map[string]bool{}
-	err = readSide(ctx, ch, "right", get, c, func(key string, r total) error {
+	err = readSide(ctx, ch, "right", kind, get, c, func(key string, r total) error {
 		if seen[key] {
 			return fmt.Errorf("key %s is returned twice; group the rows by the key", key)
 		}
@@ -80,11 +80,14 @@ func runCompare(ctx context.Context, ch config.Check, get func(string) (source.S
 
 // readSide runs one side and calls each with the key and the total of every row.
 // Its errors say which side they come from.
-func readSide(ctx context.Context, ch config.Check, name string, get func(string) (source.Source, error), c *collector, each func(string, total) error) error {
+func readSide(ctx context.Context, ch config.Check, name string, kind func(string) string, get func(string) (source.Source, error), c *collector, each func(string, total) error) error {
 	cmp := ch.Compare
 	side := ch.Side(name)
 	src, err := get(side.Source)
 	if err != nil {
+		return fmt.Errorf("%s: %w", name, err)
+	}
+	if err := runExpect(ctx, side, name, kind(side.Source), src, c.res); err != nil {
 		return fmt.Errorf("%s: %w", name, err)
 	}
 	rows := 0

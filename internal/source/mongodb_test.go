@@ -402,3 +402,34 @@ func TestMongoDBUntil(t *testing.T) {
 		}
 	}
 }
+
+func TestMongoDBExpect(t *testing.T) {
+	db, _, reader := mongoDB(t)
+	src, _, err := openMongo(t, db, reader, true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	ch := mongoCheck(t, `[{$match: {$expr: {$gte: ["$paid_at", "$$since"]}}}]`)
+	ch.Window = 24 * time.Hour
+	for pipeline, want := range map[string]any{
+		`[{$count: n}]`: int64(3),
+		`[{$match: {user_id: u1}}, {$group: {_id: null, n: {$sum: 1}}}]`: int64(2),
+	} {
+		ch.Expect = &config.Expect{Pipeline: *yamlNode(t, pipeline)}
+		ex := ch.ExpectCheck("mongodb")
+		if ex.Collection != "payments" || ex.Window != 0 {
+			t.Errorf("%s: collection %q, window %s", pipeline, ex.Collection, ex.Window)
+		}
+		var got []Row
+		err := src.Query(context.Background(), ex, time.Now(), time.Time{}, func(r Row) error {
+			got = append(got, r)
+			return nil
+		})
+		if err != nil || len(got) != 1 {
+			t.Fatalf("%s: %v, %v", pipeline, got, err)
+		}
+		if n, _ := got[0].Get("n"); n != want {
+			t.Errorf("%s: n = %v (%T), want %v", pipeline, n, n, want)
+		}
+	}
+}

@@ -75,6 +75,19 @@ type Result struct {
 	// Resolved are entries of the known file the check no longer finds. Only a
 	// full run can say that: a window run does not see older rows.
 	Resolved []Resolved
+
+	// Expected is what the expect queries found: one for a check, one per side
+	// that has it for a compare check. It is set when the check failed because
+	// of it, too.
+	Expected []Expected
+}
+
+// Expected is the number an expect query found and the least it had to find.
+type Expected struct {
+	// Side is "left" or "right" for a compare check, "" for other checks.
+	Side  string
+	Found int64
+	Min   int64
 }
 
 // Resolved is a known violation that is gone and can be removed from the file.
@@ -159,11 +172,13 @@ func Run(ctx context.Context, cfg config.Config, scope Scope, open Opener, now f
 		var err error
 		if ch.Compare != nil {
 			res.Source, res.RightSource = ch.Compare.Left.Source, ch.Compare.Right.Source
-			err = runCompare(ctx, ch, get, c)
+			err = runCompare(ctx, ch, func(name string) string { return cfg.Sources[name].Kind() }, get, c)
 		} else {
 			var src source.Source
 			if src, err = get(ch.Source); err == nil {
-				err = runOne(ctx, ch, src, c)
+				if err = runExpect(ctx, ch, "", cfg.Sources[ch.Source].Kind(), src, &res); err == nil {
+					err = runOne(ctx, ch, src, c)
+				}
 			}
 		}
 		if err != nil {
@@ -175,6 +190,50 @@ func Run(ctx context.Context, cfg config.Config, scope Scope, open Opener, now f
 		r.Results = append(r.Results, res)
 	}
 	return r
+}
+
+// runExpect runs the expect query of ch, a check or a side named side, and
+// records what it found. It fails when the number is below the minimum, so the
+// check, which would see no data, does not run. A check without expect passes.
+func runExpect(ctx context.Context, ch config.Check, side, kind string, src source.Source, res *Result) error {
+	if ch.Expect == nil {
+		return nil
+	}
+	ex := ch.ExpectCheck(kind)
+	var found int64
+	rows := 0
+	err := src.Query(ctx, ex, res.Since, res.Until, func(row source.Row) error {
+		rows++
+		if rows > 1 {
+			return errors.New("more than one row; expect returns one number, such as a count")
+		}
+		var values []any
+		for i, col := range row.Columns {
+			// The _id of $group: {_id: null, n: {$sum: 1}}.
+			if kind == "mongodb" && col == "_id" {
+				continue
+			}
+			values = append(values, row.Values[i])
+		}
+		if len(values) != 1 {
+			return fmt.Errorf("%d columns (%s); expect returns one number, such as a count", len(row.Columns), strings.Join(row.Columns, ", "))
+		}
+		n, err := integer(values[0])
+		if err != nil {
+			return fmt.Errorf("%s: %w", Display(values[0]), err)
+		}
+		found = n
+		return nil
+	})
+	if err != nil {
+		return fmt.Errorf("expect: %s", errorText(err, ex))
+	}
+	// No rows is 0: $count over nothing returns no document.
+	res.Expected = append(res.Expected, Expected{Side: side, Found: found, Min: *ch.Expect.Min})
+	if found < *ch.Expect.Min {
+		return fmt.Errorf("expect found %d, at least %d required", found, *ch.Expect.Min)
+	}
+	return nil
 }
 
 func runOne(ctx context.Context, ch config.Check, src source.Source, c *collector) error {

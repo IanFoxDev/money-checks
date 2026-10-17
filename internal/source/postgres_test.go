@@ -270,3 +270,28 @@ func TestPostgresUntil(t *testing.T) {
 		}
 	}
 }
+
+// An expect query gets $1 and $2 only when it uses them: PostgreSQL refuses a
+// parameter the statement does not have, and one it has but is not given.
+func TestPostgresExpect(t *testing.T) {
+	s := pgSchema(t)
+	src := openPG(t)
+	for _, tc := range []struct {
+		window, settle time.Duration
+		query          string
+	}{
+		{24 * time.Hour, 0, "select count(*) from " + s + ".payments"},
+		{24 * time.Hour, 0, "select count(*) from " + s + ".payments where now() >= $1"},
+		{0, 15 * time.Minute, "select count(*) from " + s + ".payments"},
+		{0, 15 * time.Minute, "select count(*) from " + s + ".payments where now() >= $1 and now() >= $2"},
+		{24 * time.Hour, 15 * time.Minute, "select count(*) from " + s + ".payments where now() >= $1"},
+	} {
+		ch := pgCheck("select id from " + s + ".payments")
+		ch.Window, ch.Settle = tc.window, tc.settle
+		ch.Expect = &config.Expect{Query: tc.query}
+		rows, err := collect(t, src, ch.ExpectCheck("postgres"))
+		if err != nil || len(rows) != 1 || rows[0].Values[0] != "2" {
+			t.Errorf("window %s, settle %s, %s: %v, %v", tc.window, tc.settle, tc.query, rows, err)
+		}
+	}
+}
