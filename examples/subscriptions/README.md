@@ -9,8 +9,8 @@ wallet balance that no longer matches its entries, ledger transactions that do n
 sum to zero, daily statistics that lost a payment, a whole batch, and gained a test
 payment.
 
-`checks.yaml` has one check per bug and one that passes. `expected.json` lists what
-money-checks must find. CI runs this example and compares the two.
+`checks.yaml` has one check per bug and one that passes. `tests.yaml` lists what
+each check must find, by id and amount, and CI runs `money-checks test` with it.
 
 ## Run it
 
@@ -23,18 +23,21 @@ The exit code is 1: checks with severity `error` found violations. The report st
 with:
 
 ```
-| Check | Severity | Status | Violations | Amount | Rows |
-|---|---|---|---:|---:|---|
-| two_renewals_in_one_period | error | violations | 1 | 9.99 USD | all |
-| two_active_subscriptions | error | violations | 2 | 1200 JPY, 9.99 USD | all |
-| provider_txn_recorded_twice | warn | violations | 1 | 1200 JPY | all |
-| refund_exceeds_payment | error | violations | 1 | 11.00 USD | all |
-| wallet_balance_matches_entries | error | violations | 1 | -1.00 EUR | all |
-| payment_without_subscription | error | ok | 0 |  | all |
-| unbalanced_transactions | error | violations | 3 | -10.00 EUR, 9.50 USD | all |
-| negative_wallet_balance | warn | violations | 1 | -3.00 USD | all |
-| payments_reach_stats | error | violations | 3 | 113.99 USD |
+| Check | Severity | Status | Violations | Amount | Rows | Expect |
+|---|---|---|---:|---:|---|---:|
+| two_renewals_in_one_period | error | violations | 1 | 9.99 USD | all | 6 |
+| two_active_subscriptions | error | violations | 2 | 1200 JPY, 9.99 USD | all | 6 |
+| provider_txn_recorded_twice | warn | violations | 1 | 1200 JPY | all | 7 |
+| refund_exceeds_payment | error | violations | 1 | 11.00 USD | all | 3 |
+| wallet_balance_matches_entries | error | violations | 1 | -1.00 EUR | all | 3 |
+| payment_without_subscription | error | ok | 0 |  | all | 10 |
+| unbalanced_transactions | error | violations | 3 | -10.00 EUR, 9.50 USD | all | 12 |
+| negative_wallet_balance | warn | violations | 1 | -3.00 USD | all | 6 |
+| payments_reach_stats | error | violations | 3 | 113.99 USD | all up to 15m ago | left 7, right 6 |
 ```
+
+Expect is what the `expect` query of each check found: the rows it reads. A check
+whose query stops seeing its data fails instead of reporting 0 violations.
 
 Each check that found something gets a section with up to 10 rows. Emails are
 masked (`a***@example.com`), because `two_active_subscriptions` lists `email` under
@@ -48,6 +51,12 @@ curl -s 127.0.0.1:8080/metrics | grep '^money_check_violations'
 ```
 
 Set `MC_PORT` if 8080 is taken on your machine.
+
+To check that every check finds exactly the planted bugs:
+
+```
+docker compose run --rm money-checks test -c /etc/money-checks/checks.yaml -t /etc/money-checks/tests.yaml
+```
 
 ## What to look at in checks.yaml
 
@@ -76,6 +85,11 @@ Set `MC_PORT` if 8080 is taken on your machine.
   ClickHouse has two rows for 2026-09-07, one per batch; the query sums them, so the
   day matches. `settle: 15m` with whole days on both sides keeps today and the last
   minutes out, where the two databases always differ.
+- **Every check has an `expect` query**, usually the same `$match` with `$count`.
+  CI changes `status: succeeded` to `status: success` in
+  `payment_without_subscription`, as if the code had started writing another
+  status. Without `expect` the check would still pass with 0 violations; with it, the
+  check fails with "expect found 0, at least 1 required" and exit code 2.
 - **Every database is read by a user that can only read.** `mongo-init/seed.js`
   creates a MongoDB user with the `read` role, `postgres/readonly.sql` a role with
   `SELECT` only, and `clickhouse/init.sh` a ClickHouse user with `SELECT` on `stats`.
