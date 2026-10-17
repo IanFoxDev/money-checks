@@ -135,6 +135,13 @@ type Opener func(ctx context.Context, name string, s config.Source, warn func(st
 // the first check that uses it runs. A source that cannot be opened fails its
 // checks; the other checks still run.
 func Run(ctx context.Context, cfg config.Config, scope Scope, open Opener, now func() time.Time) Report {
+	return RunExport(ctx, cfg, scope, open, now, nil)
+}
+
+// RunExport is Run that also calls export for every violation, new and known, in
+// the order the checks find them, with the fields of a sample: a list of every
+// row without holding them all in memory. An error from export fails the check.
+func RunExport(ctx context.Context, cfg config.Config, scope Scope, open Opener, now func() time.Time, export func(Sample) error) Report {
 	r := Report{StartedAt: now().UTC()}
 	warn := func(msg string) { r.Warnings = append(r.Warnings, msg) }
 	type opened struct {
@@ -168,7 +175,7 @@ func Run(ctx context.Context, cfg config.Config, scope Scope, open Opener, now f
 		if ch.Settle > 0 {
 			res.Until, res.Settle = r.StartedAt.Add(-ch.Settle), ch.Settle
 		}
-		c := &collector{cur: cfg.Money, ch: ch, known: cfg.Known[ch.Name], at: r.StartedAt, res: &res}
+		c := &collector{cur: cfg.Money, ch: ch, known: cfg.Known[ch.Name], at: r.StartedAt, res: &res, export: export}
 		var err error
 		if ch.Compare != nil {
 			res.Source, res.RightSource = ch.Compare.Left.Source, ch.Compare.Right.Source
@@ -275,6 +282,8 @@ type collector struct {
 	res   *Result
 	// abs adds up the absolute amounts: the differences of a compare check.
 	abs bool
+	// export, when set, gets every violation.
+	export func(Sample) error
 
 	totals, knownTotals map[string]*Money
 	seen                map[string]bool
@@ -311,11 +320,35 @@ func (c *collector) add(s Sample, fields func() []Field) error {
 			return err
 		}
 	}
-	if len(*samples) < *c.ch.Samples {
+	keep := len(*samples) < *c.ch.Samples
+	if keep || c.export != nil {
 		s.Fields = fields()
+	}
+	if keep {
 		*samples = append(*samples, s)
 	}
+	if c.export != nil {
+		return c.export(s)
+	}
 	return nil
+}
+
+// Columns names the fields of the samples of ch, in their order: the shown
+// columns, or for a compare check both sides, each count on both sides and the
+// problem.
+func Columns(ch config.Check) []string {
+	cmp := ch.Compare
+	if cmp == nil {
+		return append([]string(nil), ch.Show...)
+	}
+	var cols []string
+	if cmp.Amount != nil {
+		cols = append(cols, "left", "right")
+	}
+	for _, n := range cmp.Counts {
+		cols = append(cols, n+" left", n+" right")
+	}
+	return append(cols, "problem")
 }
 
 // finish sets the totals, the known entries no longer found and the status of a
