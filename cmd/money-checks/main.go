@@ -32,8 +32,10 @@ const (
 
 const usage = `usage:
   money-checks run -c checks.yaml [--window] [--markdown file] [--json file]
+                   [--check NAME [--csv file] [--jsonl file]]
       run every check once; the Markdown report goes to stdout unless a file is given;
-      with --window, checks that have a window read only its rows
+      with --window, checks that have a window read only its rows; with --check, only
+      that check, and --csv or --jsonl write every one of its violations
   money-checks serve -c checks.yaml
       run the checks now and every serve.interval; /metrics, /healthz, /readyz on serve.listen
   money-checks known add -c checks.yaml --check NAME --reason TEXT [--until DATE] [--limit N]
@@ -86,7 +88,14 @@ func runChecks(ctx context.Context, args []string, stdout, stderr io.Writer, ope
 	mdPath := fs.String("markdown", "", "write the Markdown report to this file instead of stdout")
 	jsonPath := fs.String("json", "", "also write the JSON report to this file")
 	window := fs.Bool("window", false, "checks with a window read only the rows of the window")
+	name := fs.String("check", "", "run only this check")
+	csvPath := fs.String("csv", "", "write every violation of the --check to this CSV file")
+	jsonlPath := fs.String("jsonl", "", "write every violation of the --check to this JSON Lines file")
 	if err := fs.Parse(args); err != nil {
+		return exitError
+	}
+	if (*csvPath != "" || *jsonlPath != "") && *name == "" {
+		fmt.Fprintln(stderr, "run: --csv and --jsonl need --check: every row of one check, for one thing to do with them")
 		return exitError
 	}
 	cfg, err := config.Load(*path)
@@ -94,11 +103,42 @@ func runChecks(ctx context.Context, args []string, stdout, stderr io.Writer, ope
 		fmt.Fprintln(stderr, err)
 		return exitError
 	}
+	if *name != "" {
+		var one []config.Check
+		for _, ch := range cfg.Checks {
+			if ch.Name == *name {
+				one = append(one, ch)
+			}
+		}
+		if len(one) == 0 {
+			fmt.Fprintf(stderr, "run: no check is named %q\n", *name)
+			return exitError
+		}
+		cfg.Checks = one
+	}
 	scope := check.Full
 	if *window {
 		scope = check.Window
 	}
-	r := check.Run(ctx, cfg, scope, open, now)
+	exp, err := newExport(cfg.Checks[0], *csvPath, *jsonlPath)
+	if err != nil {
+		fmt.Fprintln(stderr, err)
+		return exitError
+	}
+	var each func(check.Sample) error
+	if len(exp.files) > 0 {
+		each = exp.write
+	}
+	r := check.RunExport(ctx, cfg, scope, open, now, each)
+	if len(exp.files) > 0 {
+		// A failed check leaves no file: half a list looks like a whole one.
+		if r.Results[0].Status == check.StatusFailed {
+			exp.discard()
+		} else if err := exp.finish(); err != nil {
+			fmt.Fprintln(stderr, err)
+			return exitError
+		}
+	}
 	if names := cfg.WithoutExpect(); len(names) > 0 {
 		r.Warnings = append(r.Warnings, check.WithoutExpectWarning(names))
 	}
