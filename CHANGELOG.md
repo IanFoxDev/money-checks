@@ -8,6 +8,12 @@ configuration, the report format or the metric names; such changes are marked
 
 ## [Unreleased]
 
+## [0.4.0] - 2026-10-17
+
+A check that sees no data no longer passes: an `expect` query must find rows first.
+Checks can be tested against a database with known bugs, and every violation of a
+check can be written to a CSV file for the people who fix them.
+
 ### Added
 
 - `expect` on a check: a query that returns one number, such as a count of the rows
@@ -28,6 +34,15 @@ configuration, the report format or the metric names; such changes are marked
   every violation of that check, not only the samples, streamed as the database
   returns them. Values that a spreadsheet would run as a formula are prefixed with
   `'`. A failed check leaves no file.
+- The example shop has an `expect` on every check and a `tests.yaml` with every
+  planted violation; CI runs `money-checks test` with it, and shows that a check
+  whose status value changed fails instead of passing.
+
+### Changed
+
+- The JSON report has `expect` in every check, an empty list for a check without
+  one.
+- `examples/subscriptions/expected.json` is replaced by `tests.yaml`.
 
 ## [0.3.0] - 2026-10-16
 
@@ -118,7 +133,8 @@ CI, with the database tests required to run.
 - `show` and `mask` for the columns a report may contain.
 - Docker image and the example in `examples/subscriptions`.
 
-[Unreleased]: https://github.com/IanFoxDev/money-checks/compare/v0.3.0...HEAD
+[Unreleased]: https://github.com/IanFoxDev/money-checks/compare/v0.4.0...HEAD
+[0.4.0]: https://github.com/IanFoxDev/money-checks/compare/v0.3.0...v0.4.0
 [0.3.0]: https://github.com/IanFoxDev/money-checks/compare/v0.2.0...v0.3.0
 [0.2.0]: https://github.com/IanFoxDev/money-checks/compare/v0.1.0...v0.2.0
 [0.1.0]: https://github.com/IanFoxDev/money-checks/releases/tag/v0.1.0
