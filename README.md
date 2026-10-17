@@ -200,6 +200,31 @@ reaches zero. The report warns about checks without `expect`;
 `defaults.require_expect: true` makes it an error. See `docs/config.md` and
 `docs/adr/0005-expect-and-test.md`.
 
+## Test the checks
+
+A query that looked right against a copy of the data can still be wrong. Put rows
+with known bugs into a test database, list what each check must find, and run the
+checks against it in CI:
+
+```yaml
+# tests.yaml
+version: 1
+tests:
+  - check: two_renewals_in_one_period
+    violations:
+      - {id: '{"subscription":"sub_a","period":"2026-09"}', amount: 9.99 USD}
+  - check: refund_twice
+    violations: []
+```
+
+```bash
+money-checks test -c checks.yaml -t tests.yaml
+```
+
+A missing row, an extra one or an amount that differs fails the test, with a diff.
+money-checks never writes the test data: it holds no credentials that can write,
+so the database is filled by your migrations and seeds. Details: `docs/config.md`.
+
 ## Known violations
 
 The first run against a real database usually finds old rows that were looked at

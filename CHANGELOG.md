@@ -20,6 +20,10 @@ configuration, the report format or the metric names; such changes are marked
   report and `expect` in the JSON report: what the expect query found.
 - The report warns about checks without `expect`; `defaults.require_expect: true`
   makes them a configuration error.
+- `money-checks test -c checks.yaml -t tests.yaml`: runs the checks a tests file
+  lists against a test database and compares the ids and amounts they find with
+  the ones they must find. Exit code 0, 1 when a test fails, 2 when a check could
+  not run. It only reads; the known file is not used, and checks run in full.
 
 ## [0.3.0] - 2026-10-16
 

@@ -440,6 +440,7 @@ entries for you after a first run, see below.
 money-checks run -c checks.yaml [--window] [--markdown file] [--json file]
 money-checks serve -c checks.yaml
 money-checks known add -c checks.yaml --check NAME --reason TEXT [--until DATE] [--limit N]
+money-checks test -c checks.yaml -t tests.yaml
 money-checks version
 ```
 
@@ -457,6 +458,62 @@ The file is created if it does not exist. Appending needs the `known` list to be
 last key of the file; otherwise nothing is written and the entries are printed to
 add by hand. Exit code 0 when entries were added or there was nothing to add, 2 on
 an error.
+
+`test` runs the checks a tests file lists and compares what they find with what
+they must find, below. Exit code 0 when every test passes, 1 when one does not, 2
+when a check could not run.
+
+## Tests file
+
+A test database with known content, and a file that says what each check must find
+in it:
+
+```yaml
+# tests.yaml
+version: 1
+tests:
+  - check: refund_twice
+    violations:
+      - {id: pay_1, amount: 21.98 USD}
+      - {id: pay_7}
+  - check: two_active_subscriptions
+    violations: []
+```
+
+| Key | | |
+|---|---|---|
+| `check` | required | the name of a check in `checks.yaml`, once |
+| `violations` | required | the rows the check must report; `[]` when it must find nothing |
+| `violations[].id` | required | the id as the report shows it; for a `compare` check, the key such as `2026-10-13/USD` |
+| `violations[].amount` | | amount and currency, `21.98 USD`; when given it must match (for `compare`, the difference, right minus left) |
+
+```
+$ money-checks test -c checks.yaml -t tests.yaml
+FAIL  refund_twice: 2 violations, want 2 violations
+        amount  pay_1 10.99 USD, want 21.98 USD
+        missing pay_7
+        extra   pay_9 5.00 EUR
+ok    two_active_subscriptions: 0 violations
+
+not tested: unbalanced_transactions
+
+2 tests: 1 passed, 1 failed, 0 could not run
+```
+
+- money-checks does not write test data. Fill the test database the way the
+  application does: migrations and seeds, a fixture loader, or a compose file as in
+  `examples/subscriptions`. Use the same `checks.yaml` with the environment variables
+  pointing at the test database.
+- Every row a check returns is compared, not only the samples of a report, up to
+  10000; more fails the test.
+- The known file is not read, so it need not exist where the tests run.
+- Checks run in full: a check with a window gets the start of a full pass as its
+  parameter, so the result does not depend on the clock. `settle` still leaves out
+  the last minutes before now.
+- `expect` runs as in production, so the test data must satisfy it.
+- Checks the file does not list do not run and are named in the output.
+
+Why tests only read: [adr/0005-expect-and-test.md](adr/0005-expect-and-test.md).
 
 ## The JSON report
 
