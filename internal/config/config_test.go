@@ -502,3 +502,122 @@ serve: {interval: 10m}
 		}
 	}
 }
+
+func TestParseExpect(t *testing.T) {
+	ok := `
+version: 1
+sources:
+  billing: {mongodb: {uri_env: A, database: shop}}
+  ledger: {postgres: {dsn_env: B}}
+  stats: {clickhouse: {url_env: C, database: stats}}
+checks:
+  - name: rebills
+    source: billing
+    collection: payments
+    window: 24h
+    pipeline:
+      - $match: {$expr: {$gte: ["$paid_at", "$$since"]}}
+    expect:
+      pipeline:
+        - $match: {$expr: {$gte: ["$paid_at", "$$since"]}}
+        - $count: n
+  - name: refunds
+    source: ledger
+    query: select id from refunds where created_at >= $1
+    id: id
+    window: 24h
+    expect: {query: select count(*) from refunds, min: 0}
+  - name: daily
+    compare:
+      left:
+        source: billing
+        collection: purchases
+        pipeline: [{$match: {a: 1}}]
+        expect: {collection: users, pipeline: [{$count: n}], min: 10}
+      right: {source: stats, query: select 1}
+      key: [day]
+  - {name: bare, source: ledger, query: select 1 as id, id: id}
+`
+	c, err := Parse([]byte(ok), ".")
+	if err != nil {
+		t.Fatal(err)
+	}
+	rebills := c.Checks[0].ExpectCheck("mongodb")
+	if rebills.Collection != "payments" || rebills.Window != 24*time.Hour || *c.Checks[0].Expect.Min != 1 {
+		t.Errorf("rebills expect: collection %q, window %s, min %d", rebills.Collection, rebills.Window, *c.Checks[0].Expect.Min)
+	}
+	// The count does not use $1, so it is not given the window.
+	if refunds := c.Checks[1].ExpectCheck("postgres"); refunds.Window != 0 || *c.Checks[1].Expect.Min != 0 {
+		t.Errorf("refunds expect: window %s", refunds.Window)
+	}
+	left := c.Checks[2].Side("left")
+	if ex := left.ExpectCheck("mongodb"); ex.Collection != "users" || *left.Expect.Min != 10 || ex.Name != "daily left expect" {
+		t.Errorf("left expect: %+v", ex)
+	}
+	if got := strings.Join(c.WithoutExpect(), ","); got != "bare" {
+		t.Errorf("without expect: %s", got)
+	}
+
+	bad := `
+version: 1
+defaults: {require_expect: true}
+sources:
+  billing: {mongodb: {uri_env: A, database: shop}}
+  ledger: {postgres: {dsn_env: B}}
+checks:
+  - {name: missing, source: ledger, query: select 1 as id, id: id}
+  - {name: negative, source: ledger, query: select 1 as id, id: id, expect: {query: select 1, min: -1}}
+  - {name: writes, source: billing, collection: c, pipeline: [{$match: {a: 1}}], expect: {pipeline: [{$out: x}]}}
+  - {name: no_window, source: billing, collection: c, pipeline: [{$match: {a: 1}}], expect: {pipeline: [{$match: {$expr: {$gte: ["$at", "$$since"]}}}]}}
+  - {name: pg_no_window, source: ledger, query: select 1 as id, id: id, expect: {query: select count(*) from t where at >= $1}}
+  - {name: wrong_kind, source: ledger, query: select 1 as id, id: id, expect: {pipeline: [{$count: n}]}}
+  - name: on_check
+    expect: {query: select 1}
+    compare:
+      left: {source: ledger, query: select 1}
+      right: {source: ledger, query: select 1}
+      key: [day]
+  - name: pg_settle_only
+    settle: 15m
+    compare:
+      left: {source: ledger, query: select 1 where now() >= $1 and now() < $2, expect: {query: select count(*) from t where at >= $1}}
+      right: {source: ledger, query: select 1 where now() >= $1 and now() < $2, expect: {query: select count(*) from t where at < $2}}
+      key: [day]
+`
+	_, err = Parse([]byte(bad), ".")
+	if err == nil {
+		t.Fatal("no error")
+	}
+	for _, want := range []string{
+		"check missing: expect: required by defaults.require_expect",
+		"check negative: expect.min: must be 0 or more",
+		"check writes: expect: pipeline: line 10: $out writes to the database",
+		"check no_window: expect: pipeline: $$since is the start of the window; set window",
+		"check pg_no_window: expect: query: $1 is the start of the window; the check has no window",
+		"check wrong_kind: expect: collection and pipeline are for mongodb sources",
+		"check on_check: expect: a compare check sets it on each side",
+		"check on_check: expect: defaults.require_expect is set",
+		"check pg_settle_only: compare.left.expect: query: $1 without a window is given only with $2",
+		"check pg_settle_only: compare.right.expect: settle: the query must compare a time column with $2, the end of the rows that have settled, and with $1",
+	} {
+		if !strings.Contains(err.Error(), want) {
+			t.Errorf("missing %q in:\n%v", want, err)
+		}
+	}
+}
+
+func TestParseExpectFiles(t *testing.T) {
+	c, err := Parse([]byte(`
+version: 1
+sources:
+  ledger: {postgres: {dsn_env: B}}
+checks:
+  - {name: refunds, source: ledger, query: select 1 as id, id: id, expect: {query_file: refund_twice.sql}}
+`), "testdata")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(c.Checks[0].Expect.Query, "refunds") {
+		t.Errorf("expect query %q", c.Checks[0].Expect.Query)
+	}
+}

@@ -38,6 +38,8 @@ type Config struct {
 type Defaults struct {
 	Timeout time.Duration `yaml:"timeout"`
 	Samples *int          `yaml:"samples"`
+	// RequireExpect makes a check without expect a configuration error.
+	RequireExpect bool `yaml:"require_expect"`
 }
 
 // Source is one database. Connection strings come from environment variables,
@@ -114,6 +116,10 @@ type Check struct {
 	// (clickhouse).
 	Settle time.Duration `yaml:"settle"`
 
+	// Expect, when set, must find data before the check runs; see
+	// docs/adr/0005-expect-and-test.md.
+	Expect *Expect `yaml:"expect"`
+
 	// Compare, when set, replaces source, the query and id: the check reads
 	// totals from two sides and reports the keys where they differ.
 	Compare *Compare `yaml:"compare"`
@@ -144,6 +150,21 @@ type Side struct {
 	PipelineFile string    `yaml:"pipeline_file"`
 	Query        string    `yaml:"query"`
 	QueryFile    string    `yaml:"query_file"`
+	Expect       *Expect   `yaml:"expect"`
+}
+
+// Expect is a query that returns one number, such as a count of the rows the
+// check reads. Below Min the check fails: it sees no data, and finding no
+// violations would mean nothing.
+type Expect struct {
+	// Collection defaults to the collection of the check.
+	Collection   string    `yaml:"collection"`
+	Pipeline     yaml.Node `yaml:"pipeline"`
+	PipelineFile string    `yaml:"pipeline_file"`
+	Query        string    `yaml:"query"`
+	QueryFile    string    `yaml:"query_file"`
+	// Min is the smallest number that passes. Default 1.
+	Min *int64 `yaml:"min"`
 }
 
 // Side is the check a source runs for one side of a compare check: its query,
@@ -157,7 +178,64 @@ func (ch Check) Side(name string) Check {
 		Name: ch.Name + " " + name, Source: s.Source, Severity: ch.Severity,
 		Collection: s.Collection, Pipeline: s.Pipeline, Query: s.Query,
 		Timeout: ch.Timeout, Window: ch.Window, Settle: ch.Settle, Samples: ch.Samples,
+		Expect: s.Expect,
 	}
+}
+
+// ExpectCheck is the check a source runs for the expect query of ch, a check or
+// a side of a compare check: the query of expect with the timeout of ch, and the
+// window and settle of ch only when the query uses their parameters, so a count
+// that does not need the window is not given one. kind is the kind of the
+// source, as Source.Kind says it.
+func (ch Check) ExpectCheck(kind string) Check {
+	e := ch.Expect
+	ex := Check{
+		Name: ch.Name + " expect", Source: ch.Source, Severity: ch.Severity,
+		Collection: e.Collection, Pipeline: e.Pipeline, Query: e.Query,
+		Timeout: ch.Timeout, Samples: ch.Samples,
+	}
+	if ex.Collection == "" {
+		ex.Collection = ch.Collection
+	}
+	if ex.uses(kind, "since") {
+		ex.Window = ch.Window
+	}
+	if ex.uses(kind, "until") {
+		ex.Settle = ch.Settle
+	}
+	return ex
+}
+
+// uses says whether the query or pipeline of ch has the parameter since (the
+// start of the window) or until (the end of settle).
+func (ch Check) uses(kind, param string) bool {
+	switch kind {
+	case "mongodb":
+		return hasValue(&ch.Pipeline, "$$"+param)
+	case "clickhouse":
+		return clickhouseParam(param).MatchString(ch.Query)
+	default:
+		if param == "since" {
+			return strings.Contains(ch.Query, "$1")
+		}
+		return strings.Contains(ch.Query, "$2")
+	}
+}
+
+// WithoutExpect names the checks that cannot tell "no violations" from "no
+// data". A compare check with an expect on one side can: when the other side
+// sees nothing, every key of the first is a violation.
+func (c Config) WithoutExpect() []string {
+	var names []string
+	for _, ch := range c.Checks {
+		switch {
+		case ch.Compare != nil && (ch.Compare.Left.Expect != nil || ch.Compare.Right.Expect != nil):
+		case ch.Compare == nil && ch.Expect != nil:
+		default:
+			names = append(names, ch.Name)
+		}
+	}
+	return names
 }
 
 // HasAmount says whether the violations of the check have an amount.
@@ -197,6 +275,7 @@ const (
 	DefaultListen    = ":8080"
 	MaxSamples       = 1000
 	DefaultMaxRows   = 100000
+	DefaultExpectMin = 1
 )
 
 // Load reads and checks a configuration file. pipeline_file and query_file are
@@ -245,6 +324,11 @@ func (c *Config) readFiles(dir string) []error {
 		if err := readFiles(dir, &ch.Query, ch.QueryFile, &ch.Pipeline, ch.PipelineFile); err != nil {
 			errs = append(errs, fmt.Errorf("check %s: %w", ch.Name, err))
 		}
+		if e := ch.Expect; e != nil {
+			if err := readFiles(dir, &e.Query, e.QueryFile, &e.Pipeline, e.PipelineFile); err != nil {
+				errs = append(errs, fmt.Errorf("check %s: expect: %w", ch.Name, err))
+			}
+		}
 		if cmp := ch.Compare; cmp != nil {
 			for _, side := range []struct {
 				name string
@@ -252,6 +336,11 @@ func (c *Config) readFiles(dir string) []error {
 			}{{"left", &cmp.Left}, {"right", &cmp.Right}} {
 				if err := readFiles(dir, &side.s.Query, side.s.QueryFile, &side.s.Pipeline, side.s.PipelineFile); err != nil {
 					errs = append(errs, fmt.Errorf("check %s: compare.%s: %w", ch.Name, side.name, err))
+				}
+				if e := side.s.Expect; e != nil {
+					if err := readFiles(dir, &e.Query, e.QueryFile, &e.Pipeline, e.PipelineFile); err != nil {
+						errs = append(errs, fmt.Errorf("check %s: compare.%s.expect: %w", ch.Name, side.name, err))
+					}
 				}
 			}
 		}
@@ -325,6 +414,16 @@ func (c *Config) applyDefaults() {
 		}
 		if ch.Compare != nil && ch.Compare.MaxRows == 0 {
 			ch.Compare.MaxRows = DefaultMaxRows
+		}
+		expects := []*Expect{ch.Expect}
+		if ch.Compare != nil {
+			expects = append(expects, ch.Compare.Left.Expect, ch.Compare.Right.Expect)
+		}
+		for _, e := range expects {
+			if e != nil && e.Min == nil {
+				one := int64(DefaultExpectMin)
+				e.Min = &one
+			}
 		}
 	}
 	if c.Serve.Interval == 0 {
@@ -459,6 +558,7 @@ func (c *Config) checkCheck(where string, ch Check) []error {
 		return append(errs, c.checkCompare(where, ch)...)
 	}
 	c.checkQuery(ch, true, add)
+	c.checkExpect(ch, "expect", add)
 	if a := ch.Amount; a != nil {
 		c.checkAmount(*a, add)
 	}
@@ -546,6 +646,44 @@ func (c *Config) checkQuery(ch Check, needID bool, add func(string, ...any)) {
 	}
 }
 
+// checkExpect checks the expect query of a check or of a side, ch. where is
+// how the errors name it.
+func (c *Config) checkExpect(ch Check, where string, add func(string, ...any)) {
+	e := ch.Expect
+	if e == nil {
+		if c.Defaults.RequireExpect && ch.Compare == nil && where == "expect" {
+			add("expect: required by defaults.require_expect; a query that must find data, such as a count of the rows the check reads")
+		}
+		return
+	}
+	if *e.Min < 0 {
+		add("%s.min: must be 0 or more", where)
+	}
+	src, ok := c.Sources[ch.Source]
+	if !ok {
+		return // checkQuery says so
+	}
+	kind := src.Kind()
+	ex := ch.ExpectCheck(kind)
+	in := func(format string, a ...any) { add(where+": "+format, a...) }
+	if kind == "mongodb" && e.Collection == "" && ch.Collection == "" {
+		return // checkQuery of the check says that collection is required
+	}
+	c.checkQuery(ex, false, in)
+	if kind != "postgres" {
+		return
+	}
+	// The window and settle of the check are given to the expect query only
+	// when it uses them, so a $1 the check cannot give is an error here, not a
+	// failed run.
+	switch since, until := ex.uses(kind, "since"), ex.uses(kind, "until"); {
+	case since && ch.Window == 0 && ch.Settle == 0:
+		in("query: $1 is the start of the window; the check has no window")
+	case since && ch.Window == 0 && !until:
+		in("query: $1 without a window is given only with $2, the end of the rows that have settled")
+	}
+}
+
 func (c *Config) checkAmount(a Amount, add func(string, ...any)) {
 	if a.Field == "" {
 		add("amount.field: required")
@@ -583,11 +721,18 @@ func (c *Config) checkCompare(where string, ch Check) []error {
 			add("%s: a compare check sets it under compare or on each side, not on the check", f.name)
 		}
 	}
+	if ch.Expect != nil {
+		add("expect: a compare check sets it on each side, compare.left.expect and compare.right.expect")
+	}
+	if c.Defaults.RequireExpect && cmp.Left.Expect == nil && cmp.Right.Expect == nil {
+		add("expect: defaults.require_expect is set; give compare.left or compare.right an expect query")
+	}
 	for _, name := range []string{"left", "right"} {
 		side := ch.Side(name)
 		c.checkQuery(side, false, func(format string, a ...any) {
 			add("compare."+name+": "+format, a...)
 		})
+		c.checkExpect(side, "compare."+name+".expect", add)
 	}
 	key := map[string]bool{}
 	if len(cmp.Key) == 0 {
