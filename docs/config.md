@@ -10,6 +10,7 @@ currencies: {USDT: 6}      # optional: codes ISO 4217 does not have, or a differ
 defaults:
   timeout: 30s             # per check; default 30s
   samples: 10              # rows shown per check; default 10, at most 1000
+  require_expect: false    # true: a check without expect is an error, see below
 sources: {...}
 checks: [...]
 serve: {...}               # only for money-checks serve
@@ -103,6 +104,7 @@ A list. Checks run in this order, one at a time.
 | `window` | | `24h`: `serve` and `run --window` read only the rows since then, below |
 | `compare` | | two sides whose totals must match, below; replaces `source`, the query, `id`, `amount`, `show` and `mask` |
 | `settle` | compare | `15m`: both sides leave out the rows of the last 15 minutes, below |
+| `expect` | | a query that must find data before the check runs, below; on a compare check, on each side |
 
 Every row the query returns is a violation. Write the query so that a correct
 database returns nothing.
@@ -249,7 +251,7 @@ its own database and compares the totals key by key:
 
 | Key | | |
 |---|---|---|
-| `left`, `right` | required | each a `source` with a `collection` and a `pipeline` (or `pipeline_file`), or a `query` (or `query_file`); the two sources may be the same |
+| `left`, `right` | required | each a `source` with a `collection` and a `pipeline` (or `pipeline_file`), or a `query` (or `query_file`), and an optional `expect`; the two sources may be the same |
 | `key` | required | the columns both sides return and group by; the id of a violation is their values joined with `/`, such as `2026-10-13/USD` |
 | `amount` | | as for other checks, read the same way on both sides; `currency_field` must be in `key` |
 | `counts` | | integer columns that must be equal on both sides |
@@ -319,6 +321,64 @@ until the day ends, whatever `settle` says. Compare whole days on both sides, as
 above: `day < toDate(until)` on one side, `$dateTrunc` of `$$until` on the other.
 Pick `settle` longer than the usual delay between the sides, and alert on the lag
 itself elsewhere: a consumer that is an hour behind is an incident of its own.
+
+### expect
+
+A check that finds nothing because its query sees nothing looks like a check that
+passes. A renamed field, a status written in another case, a collection that moved:
+the query keeps running and returns no rows. `expect` is a second query that returns
+one number, usually a count of the rows the check reads, and the check fails when the
+number is below `min`:
+
+```yaml
+  - name: refund_twice
+    source: ledger
+    query_file: refund_twice.sql
+    id: payment_id
+    expect:
+      query: select count(*) from refunds where created_at >= now() - interval '7 days'
+  - name: two_renewals_in_one_period
+    source: shop
+    collection: payments
+    pipeline: [...]
+    expect:
+      pipeline:
+        - $match: {kind: renewal, status: succeeded, paid_at: {$gte: {$date: "2026-01-01T00:00:00Z"}}}
+        - $count: n
+      min: 100
+```
+
+| Key | | |
+|---|---|---|
+| `query`, `query_file` | postgres, clickhouse | one statement that returns one row with one column |
+| `pipeline`, `pipeline_file` | mongodb | a pipeline that returns one document with one field besides `_id`, such as `$count` |
+| `collection` | mongodb | default: the collection of the check |
+| `min` | | the smallest number that passes; default 1 |
+
+- It runs before the check, against the same source, with the same read-only rules
+  and the same timeout. When the number is below `min`, the check is `failed` with
+  "expect found 0, at least 1 required" and its query does not run.
+- No rows is 0, because `$count` over no documents returns none. More than one row,
+  more than one column, or a value that is not an integer fails the check.
+- A failed check is what a check that sees nothing should be: exit code 2,
+  `money_check_up` 0, the violation gauges keep their last values, Slack says it
+  fails, and `money_check_last_success_timestamp_seconds` stops moving.
+- The number is in the report (column Expect) and in `money_check_expect_value`, also
+  when it is above `min`, so a drop can be seen before it reaches zero.
+- The query may use the parameters of the check: the start of the window (`$1`,
+  `$$since`, `{since:DateTime64(6, 'UTC')}`) and, on a compare side, the end of
+  `settle`. It gets them only if it uses them, so a count over the last week needs no
+  window. In a window run, "no payments since the start of the window" then fails the
+  check. On PostgreSQL, `$1` needs a window on the check, or `$2` and `settle`.
+- On a `compare` check each side has its own `expect`, under `compare.left` and
+  `compare.right`. One is enough to tell a dead side: when the other side sees
+  nothing, every key of the first is a violation.
+- The report lists the checks without `expect` in its warnings.
+  `defaults.require_expect: true` makes a check without it a configuration error; a
+  compare check then needs `expect` on at least one side.
+
+Keep it cheap: a count over an indexed range, not a second scan of the table. Why it
+works this way: [adr/0005-expect-and-test.md](adr/0005-expect-and-test.md).
 
 ## serve
 
@@ -426,7 +486,8 @@ an error.
       "known_samples": [
         {"id": "...", "amount": {"currency": "USD", "minor": 2699, "amount": "26.99"}, "reason": "refunded by hand, FIN-12"}
       ],
-      "resolved": [{"id": "...", "reason": "test account, deleted"}]
+      "resolved": [{"id": "...", "reason": "test account, deleted"}],
+      "expect": [{"found": 1532, "min": 1}]
     }
   ]
 }
@@ -442,4 +503,6 @@ again has a `note` that says why. `scope` is `full` when the check read every ro
 window run does not see older rows. A `compare` check has `right_source` next to
 `source`, its left side; the amount of each of its samples is the difference, right
 minus left, and its `fields` are both sides and the `problem`. With `settle` it has
-`until`, the end of the rows both sides read, and `settle`.
+`until`, the end of the rows both sides read, and `settle`. `expect` has what the
+expect query found and its `min`; a compare check has one entry per side that has
+an expect, with `side` `left` or `right`.

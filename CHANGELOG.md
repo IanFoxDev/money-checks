@@ -8,6 +8,19 @@ configuration, the report format or the metric names; such changes are marked
 
 ## [Unreleased]
 
+### Added
+
+- `expect` on a check: a query that returns one number, such as a count of the rows
+  the check reads, and must reach `min` (1 by default). Below it the check fails
+  before its query runs, so a check whose query no longer sees any data does not
+  pass. It runs against the same source with the same read-only rules and timeout,
+  and gets the start of the window and the end of `settle` when it uses them. Each
+  side of a `compare` check has its own. See `docs/adr/0005-expect-and-test.md`.
+- `money_check_expect_value{check, scope, side}`, the Expect column of the Markdown
+  report and `expect` in the JSON report: what the expect query found.
+- The report warns about checks without `expect`; `defaults.require_expect: true`
+  makes them a configuration error.
+
 ## [0.3.0] - 2026-10-16
 
 Money that lives in two databases: a check can compare the totals of MongoDB,

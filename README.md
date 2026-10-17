@@ -97,6 +97,7 @@ against a staging copy.
 | `money_check_last_success_timestamp_seconds` | `check`, `scope` | when the check last finished |
 | `money_check_duration_seconds` | `check`, `scope` | how long the last run took |
 | `money_check_errors_total` | `check` | runs that failed |
+| `money_check_expect_value` | `check`, `scope`, `side` | the number the `expect` query found, below |
 | `money_checks_runs_total` | | runs of all checks |
 
 When a run fails, `money_check_up` drops to 0 and the violation gauges keep the last
@@ -173,6 +174,31 @@ metric is the money that does not match. Amounts meet in minor units, so a Mongo
 double and a ClickHouse `Decimal` compare exactly. `settle: 15m` leaves the last
 fifteen minutes out of both sides, so a purchase still on its way through Kafka is
 not reported. Details: `docs/config.md`.
+
+## A check that sees nothing
+
+Zero rows means the rule holds, or that the query no longer sees the data: a field
+renamed in the code, a status that changed case, a collection moved to another
+database. The check stays green and nobody notices. Give it an `expect` query that
+must find data, usually a count of the rows it reads:
+
+```yaml
+  - name: two_renewals_in_one_period
+    ...
+    expect:
+      pipeline:
+        - $match: {kind: renewal, status: succeeded}
+        - $count: n
+      min: 1          # the default
+```
+
+It runs first. When it finds less than `min`, the check fails instead of passing:
+exit code 2, `money_check_up` 0, a Slack message, and the alert on checks that have
+not finished a run fires without a new rule. The number is in the report and in
+`money_check_expect_value`, so a drop from thousands to ten is visible before it
+reaches zero. The report warns about checks without `expect`;
+`defaults.require_expect: true` makes it an error. See `docs/config.md` and
+`docs/adr/0005-expect-and-test.md`.
 
 ## Known violations
 
