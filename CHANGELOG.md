@@ -24,6 +24,10 @@ configuration, the report format or the metric names; such changes are marked
   lists against a test database and compares the ids and amounts they find with
   the ones they must find. Exit code 0, 1 when a test fails, 2 when a check could
   not run. It only reads; the known file is not used, and checks run in full.
+- `run --check NAME` runs one check; with `--csv file` or `--jsonl file` it writes
+  every violation of that check, not only the samples, streamed as the database
+  returns them. Values that a spreadsheet would run as a formula are prefixed with
+  `'`. A failed check leaves no file.
 
 ## [0.3.0] - 2026-10-16
 

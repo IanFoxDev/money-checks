@@ -309,12 +309,27 @@ Connection strings and the Slack webhook come from environment variables named i
 file, never from the file itself. Why it is built this way:
 [docs/adr/0001-read-only-and-money.md](docs/adr/0001-read-only-and-money.md).
 
+## Every row, for the people who fix it
+
+The report shows ten samples per check. Support refunding double charges, or
+finance correcting a payout, needs all of them:
+
+```bash
+money-checks run -c checks.yaml --check two_renewals_in_one_period --csv renewals.csv
+```
+
+Every violation of that check goes to the file, with the same `show` columns and
+masking as the report, and a `known` column for the rows the known file accepts.
+`--jsonl` writes the same rows for a script. See `docs/config.md`.
+
 ## What leaves the database
 
 A report shows, for at most `samples` rows per check (10 by default), the `id`
 column, the amount and the columns listed in `show`. Columns in `mask` are masked
 (`anna@example.com` becomes `a***@example.com`). Every other column the query returns
-is dropped before anything is written. Slack messages carry no rows at all.
+is dropped before anything is written. `--csv` and `--jsonl` write every row of
+one check, with the same columns and masking, and only when asked for by name.
+Slack messages carry no rows at all.
 
 ## Example
 

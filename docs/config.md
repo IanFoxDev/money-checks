@@ -438,6 +438,7 @@ entries for you after a first run, see below.
 
 ```
 money-checks run -c checks.yaml [--window] [--markdown file] [--json file]
+                 [--check NAME [--csv file] [--jsonl file]]
 money-checks serve -c checks.yaml
 money-checks known add -c checks.yaml --check NAME --reason TEXT [--until DATE] [--limit N]
 money-checks test -c checks.yaml -t tests.yaml
@@ -448,6 +449,25 @@ money-checks version
 JSON report when `--json` is given. With `--window`, checks that have a `window` read
 only its rows; without it, `run` reads every row. Warnings and the errors of failed checks go to
 stderr. `serve` logs JSON to stderr and stops on SIGINT or SIGTERM.
+
+With `--check`, `run` runs that check only. `--csv` and `--jsonl` then write every
+violation it finds, not only the samples of the report: the list a refund or a
+fix is made from.
+
+- The CSV has `id`, `amount` and `currency` when the check has an amount, the
+  columns of `show` (masked as in the report) or, for a `compare` check, both sides,
+  the counts and the problem, then `known`, the reason of a row the known file
+  accepts, and `known_note`, why a listed row counts again. Known rows are in the
+  list; filter them by `known`. The amount of a `compare` row is the difference,
+  right minus left.
+- A value that starts with `=`, `+`, `-` or `@` and is not a number gets a `'` in
+  front, so a spreadsheet shows it instead of running it as a formula.
+- JSON Lines has one object per violation, as the samples of the JSON report.
+- The rows are written as the database returns them, not held in memory. Each file
+  is written next to its target and renamed when the check finishes; a check that
+  fails leaves no file. The files are readable by their owner only.
+- `--csv` and `--jsonl` without `--check` are an error: the list is for one thing to
+  do, and the columns differ from check to check.
 
 `known add` runs one check and appends every new violation it finds to the known
 file: one entry per row, with the reason, the amount and `until` when given. It runs

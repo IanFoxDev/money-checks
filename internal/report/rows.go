@@ -13,8 +13,8 @@ import (
 // CSV writes every violation of one check as a row, for a spreadsheet: id,
 // amount and currency when the check has an amount, the columns of its samples,
 // then known (the reason, for a known violation) and known_note (why a row the
-// known file lists counts again). The header is written
-// first. Call Flush at the end.
+// known file lists counts again). The header is written first. Call Flush at
+// the end.
 type CSV struct {
 	w         *csv.Writer
 	columns   []string
