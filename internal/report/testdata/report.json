@@ -61,7 +61,8 @@
       "known": 0,
       "known_totals": [],
       "known_samples": [],
-      "resolved": []
+      "resolved": [],
+      "expect": []
     },
     {
       "name": "balance_matches_journal",
@@ -76,7 +77,8 @@
       "known": 0,
       "known_totals": [],
       "known_samples": [],
-      "resolved": []
+      "resolved": [],
+      "expect": []
     },
     {
       "name": "paid_without_access",
@@ -95,7 +97,8 @@
       "known": 0,
       "known_totals": [],
       "known_samples": [],
-      "resolved": []
+      "resolved": [],
+      "expect": []
     },
     {
       "name": "refund_twice",
@@ -111,7 +114,8 @@
       "known": 0,
       "known_totals": [],
       "known_samples": [],
-      "resolved": []
+      "resolved": [],
+      "expect": []
     }
   ]
 }

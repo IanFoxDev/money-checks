@@ -192,6 +192,11 @@ func Run(ctx context.Context, cfg config.Config, scope Scope, open Opener, now f
 	return r
 }
 
+// WithoutExpectWarning is the warning about the checks that have no expect query.
+func WithoutExpectWarning(names []string) string {
+	return "checks without expect, which cannot tell no violations from no data: " + strings.Join(names, ", ")
+}
+
 // runExpect runs the expect query of ch, a check or a side named side, and
 // records what it found. It fails when the number is below the minimum, so the
 // check, which would see no data, does not run. A check without expect passes.

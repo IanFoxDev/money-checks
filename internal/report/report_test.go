@@ -137,7 +137,7 @@ func TestJSONEmptyListsAreNotNull(t *testing.T) {
 	if err := JSON(&b, check.Report{Results: []check.Result{{Name: "c", Status: check.StatusOK}}}); err != nil {
 		t.Fatal(err)
 	}
-	for _, want := range []string{`"warnings": []`, `"totals": []`, `"samples": []`, `"known_totals": []`, `"known_samples": []`, `"resolved": []`} {
+	for _, want := range []string{`"warnings": []`, `"totals": []`, `"samples": []`, `"known_totals": []`, `"known_samples": []`, `"resolved": []`, `"expect": []`} {
 		if !bytes.Contains(b.Bytes(), []byte(want)) {
 			t.Errorf("missing %s in %s", want, b.String())
 		}
@@ -209,4 +209,34 @@ func TestJSONCompare(t *testing.T) {
 		t.Fatal(err)
 	}
 	golden(t, "report_compare.json", b.Bytes())
+}
+
+// withExpect is sample() with expect queries: the first check sees its data, the
+// last one fails because its expect found nothing.
+func withExpect() check.Report {
+	r := sample()
+	r.Results[0].Expected = []check.Expected{{Found: 1532, Min: 1}}
+	ref := &r.Results[3]
+	ref.Error, ref.Expected = "expect found 0, at least 1 required", []check.Expected{{Found: 0, Min: 1}}
+	r.Results = append(r.Results, check.Result{
+		Name: "purchases_reach_stats", Source: "billing", RightSource: "stats", Severity: "error", Status: check.StatusOK, Scope: check.Full,
+		Expected: []check.Expected{{Side: "left", Found: 40, Min: 1}, {Side: "right", Found: 12, Min: 10}},
+	})
+	return r
+}
+
+func TestMarkdownExpect(t *testing.T) {
+	var b bytes.Buffer
+	if err := Markdown(&b, withExpect()); err != nil {
+		t.Fatal(err)
+	}
+	golden(t, "report_expect.md", b.Bytes())
+}
+
+func TestJSONExpect(t *testing.T) {
+	var b bytes.Buffer
+	if err := JSON(&b, withExpect()); err != nil {
+		t.Fatal(err)
+	}
+	golden(t, "report_expect.json", b.Bytes())
 }

@@ -74,6 +74,11 @@ checks:
 	if !strings.Contains(out, "| refund_twice | error | failed | - |  |") || !strings.Contains(errOut, "check refund_twice failed: source ledger: environment variable MC_CLI_EMPTY is empty") {
 		t.Errorf("stdout %q\nstderr %q", out, errOut)
 	}
+	// The check has no expect, so the report says it cannot tell no data from no violations.
+	const warn = "checks without expect, which cannot tell no violations from no data: refund_twice"
+	if !strings.Contains(out, "Warning: "+warn) || !strings.Contains(errOut, "warning: "+warn) {
+		t.Errorf("stdout %q\nstderr %q", out, errOut)
+	}
 	var r struct {
 		Summary struct{ Failed int }
 	}

@@ -61,6 +61,11 @@ checks:
 
 func newServer(t *testing.T, src *script) (*Server, *notes) {
 	t.Helper()
+	return newServerWith(t, conf, src)
+}
+
+func newServerWith(t *testing.T, conf string, src *script) (*Server, *notes) {
+	t.Helper()
 	cfg, err := config.Parse([]byte(conf), ".")
 	if err != nil {
 		t.Fatal(err)
@@ -329,4 +334,33 @@ func TestCycleWindow(t *testing.T) {
 		t.Errorf("messages:\n%s\nwant:\n%s", strings.Join(n.msgs, "\n"), strings.Join(want, "\n"))
 	}
 	has(t, scrape(t, s), `money_check_violations{check="two_active_subscriptions",scope="full",severity="error"} 0`)
+}
+
+func TestExpectMetricAndFailure(t *testing.T) {
+	src := &script{runs: [][]source.Row{
+		{{Columns: []string{"n"}, Values: []any{"1532"}}}, {r("u1", 999, "USD")},
+		{}, // the expect query finds nothing; the check does not run
+	}}
+	s, n := newServerWith(t, conf+"    expect: {query: select count(*) from subscriptions}\n", src)
+	ctx := context.Background()
+
+	s.Cycle(ctx)
+	has(t, scrape(t, s),
+		`money_check_expect_value{check="two_active_subscriptions",scope="full",side=""} 1532`,
+		`money_check_violations{check="two_active_subscriptions",scope="full",severity="error"} 1`,
+	)
+
+	s.Cycle(ctx)
+	has(t, scrape(t, s),
+		`money_check_expect_value{check="two_active_subscriptions",scope="full",side=""} 0`,
+		`money_check_up{check="two_active_subscriptions"} 0`,
+		`money_check_violations{check="two_active_subscriptions",scope="full",severity="error"} 1`,
+	)
+	if src.n != 3 {
+		t.Errorf("%d queries, want 3", src.n)
+	}
+	want := "money-checks: two_active_subscriptions failed: expect found 0, at least 1 required"
+	if len(n.msgs) != 2 || n.msgs[1] != want {
+		t.Errorf("messages %q", n.msgs)
+	}
 }

@@ -18,6 +18,7 @@ type metrics struct {
 	lastSuccess *prometheus.GaugeVec
 	duration    *prometheus.GaugeVec
 	errors      *prometheus.CounterVec
+	expect      *prometheus.GaugeVec
 }
 
 func newMetrics(reg prometheus.Registerer) *metrics {
@@ -47,8 +48,11 @@ func newMetrics(reg prometheus.Registerer) *metrics {
 		errors: prometheus.NewCounterVec(prometheus.CounterOpts{
 			Name: "money_check_errors_total", Help: "Runs of the check that failed.",
 		}, []string{"check"}),
+		expect: prometheus.NewGaugeVec(prometheus.GaugeOpts{
+			Name: "money_check_expect_value", Help: "The number the expect query of the check found on its last run; side is left or right for a compare check.",
+		}, []string{"check", "scope", "side"}),
 	}
-	reg.MustRegister(m.runs, m.violations, m.known, m.amount, m.up, m.lastSuccess, m.duration, m.errors)
+	reg.MustRegister(m.runs, m.violations, m.known, m.amount, m.up, m.lastSuccess, m.duration, m.errors, m.expect)
 	return m
 }
 
@@ -59,6 +63,10 @@ func newMetrics(reg prometheus.Registerer) *metrics {
 func (m *metrics) update(res check.Result, now time.Time) {
 	scope := string(res.Scope)
 	m.duration.WithLabelValues(res.Name, scope).Set(res.Duration.Seconds())
+	// Also when the expect query made the check fail: the drop is the news.
+	for _, e := range res.Expected {
+		m.expect.WithLabelValues(res.Name, scope, e.Side).Set(float64(e.Found))
+	}
 	if res.Status == check.StatusFailed {
 		m.up.WithLabelValues(res.Name).Set(0)
 		m.errors.WithLabelValues(res.Name).Inc()

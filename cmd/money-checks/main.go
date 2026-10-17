@@ -93,6 +93,9 @@ func runChecks(ctx context.Context, args []string, stdout, stderr io.Writer, ope
 		scope = check.Window
 	}
 	r := check.Run(ctx, cfg, scope, open, now)
+	if names := cfg.WithoutExpect(); len(names) > 0 {
+		r.Warnings = append(r.Warnings, check.WithoutExpectWarning(names))
+	}
 	for _, w := range r.Warnings {
 		fmt.Fprintln(stderr, "warning:", w)
 	}

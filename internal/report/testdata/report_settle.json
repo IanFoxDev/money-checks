@@ -61,7 +61,8 @@
       "known": 0,
       "known_totals": [],
       "known_samples": [],
-      "resolved": []
+      "resolved": [],
+      "expect": []
     },
     {
       "name": "payouts_match",
@@ -78,7 +79,8 @@
       "known": 0,
       "known_totals": [],
       "known_samples": [],
-      "resolved": []
+      "resolved": [],
+      "expect": []
     }
   ]
 }

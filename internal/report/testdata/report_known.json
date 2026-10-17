@@ -87,7 +87,8 @@
           "id": "{\"subscription\":\"s0\",\"period\":\"2026-07\"}",
           "reason": "fixed | in the data"
         }
-      ]
+      ],
+      "expect": []
     },
     {
       "name": "balance_matches_journal",
@@ -107,7 +108,8 @@
           "reason": "test account"
         }
       ],
-      "resolved": []
+      "resolved": [],
+      "expect": []
     },
     {
       "name": "paid_without_access",
@@ -126,7 +128,8 @@
       "known": 0,
       "known_totals": [],
       "known_samples": [],
-      "resolved": []
+      "resolved": [],
+      "expect": []
     },
     {
       "name": "refund_twice",
@@ -142,7 +145,8 @@
       "known": 0,
       "known_totals": [],
       "known_samples": [],
-      "resolved": []
+      "resolved": [],
+      "expect": []
     }
   ]
 }

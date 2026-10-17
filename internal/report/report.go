@@ -23,10 +23,11 @@ func Markdown(w io.Writer, r check.Report) error {
 	for _, w := range r.Warnings {
 		fmt.Fprintf(&b, "Warning: %s\n\n", w)
 	}
-	withKnown, withWindow := false, false
+	withKnown, withWindow, withExpect := false, false, false
 	for _, res := range r.Results {
 		withKnown = withKnown || res.Known > 0 || len(res.Resolved) > 0
 		withWindow = withWindow || res.Scope == check.Window || res.Settle > 0
+		withExpect = withExpect || len(res.Expected) > 0
 	}
 	b.WriteString("| Check | Severity | Status | Violations | Amount |")
 	align := "|---|---|---|---:|---:|"
@@ -38,6 +39,10 @@ func Markdown(w io.Writer, r check.Report) error {
 		b.WriteString(" Rows |")
 		align += "---|"
 	}
+	if withExpect {
+		b.WriteString(" Expect |")
+		align += "---:|"
+	}
 	b.WriteString("\n" + align + "\n")
 	for _, res := range r.Results {
 		fmt.Fprintf(&b, "| %s | %s | %s | %s | %s |", cell(res.Name), res.Severity, res.Status, count(res), cell(totals(res.Totals)))
@@ -46,6 +51,9 @@ func Markdown(w io.Writer, r check.Report) error {
 		}
 		if withWindow {
 			fmt.Fprintf(&b, " %s |", rows(res))
+		}
+		if withExpect {
+			fmt.Fprintf(&b, " %s |", expected(res))
 		}
 		b.WriteString("\n")
 	}
@@ -165,6 +173,22 @@ func rows(res check.Result) string {
 	return s
 }
 
+// expected is what the expect queries found: "1532", or "left 40, right 12"
+// for a compare check, and "-" for a check without expect.
+func expected(res check.Result) string {
+	if len(res.Expected) == 0 {
+		return "-"
+	}
+	parts := make([]string, len(res.Expected))
+	for i, e := range res.Expected {
+		parts[i] = fmt.Sprint(e.Found)
+		if e.Side != "" {
+			parts[i] = e.Side + " " + parts[i]
+		}
+	}
+	return strings.Join(parts, ", ")
+}
+
 func knownCount(res check.Result) string {
 	if res.Status == check.StatusFailed {
 		return "-"
@@ -264,6 +288,14 @@ type jsonCheck struct {
 	KnownTotals  []jsonMoney    `json:"known_totals"`
 	KnownSamples []jsonSample   `json:"known_samples"`
 	Resolved     []jsonResolved `json:"resolved"`
+	// Expect is what the expect queries found, one per side of a compare check.
+	Expect []jsonExpected `json:"expect"`
+}
+
+type jsonExpected struct {
+	Side  string `json:"side,omitempty"`
+	Found int64  `json:"found"`
+	Min   int64  `json:"min"`
 }
 
 type jsonResolved struct {
@@ -304,6 +336,10 @@ func JSON(w io.Writer, r check.Report) error {
 			Error: res.Error, DurationMS: res.Duration.Milliseconds(), Scope: string(res.Scope),
 			Totals: []jsonMoney{}, Samples: []jsonSample{},
 			Known: res.Known, KnownTotals: []jsonMoney{}, KnownSamples: []jsonSample{}, Resolved: []jsonResolved{},
+			Expect: []jsonExpected{},
+		}
+		for _, e := range res.Expected {
+			c.Expect = append(c.Expect, jsonExpected(e))
 		}
 		if res.Scope == check.Window {
 			since := res.Since

@@ -118,6 +118,9 @@ func (s *Server) Run(ctx context.Context) error {
 	errc := make(chan error, 1)
 	go func() { errc <- srv.Serve(ln) }()
 	s.log.Info("serving", "listen", ln.Addr().String(), "interval", s.cfg.Serve.Interval.String(), "checks", len(s.cfg.Checks))
+	if names := s.cfg.WithoutExpect(); len(names) > 0 {
+		s.log.Warn(check.WithoutExpectWarning(names))
+	}
 
 	tick := time.NewTicker(s.cfg.Serve.Interval)
 	defer tick.Stop()
