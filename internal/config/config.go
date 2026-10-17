@@ -281,11 +281,21 @@ const (
 // Load reads and checks a configuration file. pipeline_file and query_file are
 // resolved against the file's directory.
 func Load(path string) (Config, error) {
+	return load(path, true)
+}
+
+// LoadWithoutKnown is Load without the known file, which may not exist where
+// the checks are tested: known violations are a fact about one database.
+func LoadWithoutKnown(path string) (Config, error) {
+	return load(path, false)
+}
+
+func load(path string, known bool) (Config, error) {
 	data, err := os.ReadFile(path)
 	if err != nil {
 		return Config{}, err
 	}
-	c, err := Parse(data, filepath.Dir(path))
+	c, err := parse(data, filepath.Dir(path), known)
 	if err != nil {
 		return Config{}, fmt.Errorf("%s: %w", path, err)
 	}
@@ -295,6 +305,10 @@ func Load(path string) (Config, error) {
 // Parse decodes and checks a configuration. Unknown keys are errors with the line
 // they are on. All problems are reported at once.
 func Parse(data []byte, dir string) (Config, error) {
+	return parse(data, dir, true)
+}
+
+func parse(data []byte, dir string, known bool) (Config, error) {
 	dec := yaml.NewDecoder(bytes.NewReader(data))
 	dec.KnownFields(true)
 	var c Config
@@ -310,7 +324,11 @@ func Parse(data []byte, dir string) (Config, error) {
 	errs = append(errs, c.readFiles(dir)...)
 	c.applyDefaults()
 	errs = append(errs, c.check()...)
-	errs = append(errs, c.readKnown(dir)...)
+	if known {
+		errs = append(errs, c.readKnown(dir)...)
+	} else {
+		c.KnownFile = ""
+	}
 	if len(errs) > 0 {
 		return Config{}, errors.Join(errs...)
 	}
