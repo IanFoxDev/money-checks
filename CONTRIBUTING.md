@@ -33,7 +33,7 @@ cd examples/subscriptions && docker compose build && docker compose run --rm mon
 | `internal/check` | Running the checks, totals per currency, samples and masking |
 | `internal/report` | Markdown and JSON |
 | `internal/serve` | The schedule, metrics, readiness and Slack |
-| `examples/subscriptions` | The example shop; `expected.json` is what the checks must find |
+| `examples/subscriptions` | The example shop; `tests.yaml` is what the checks must find, for `money-checks test` |
 
 ## Adding a source
 

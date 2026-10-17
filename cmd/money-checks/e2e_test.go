@@ -9,7 +9,6 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
-	"reflect"
 	"strings"
 	"testing"
 	"time"
@@ -57,37 +56,25 @@ func TestEndToEndExample(t *testing.T) {
 
 	var report struct {
 		Checks []struct {
-			Name       string
-			Status     string
-			Violations int64
-			Totals     []struct{ Currency, Amount string }
+			Name   string
+			Status string
+			Expect []struct{ Found int64 }
 		}
 	}
 	b, err := os.ReadFile(jsonPath)
 	if err != nil || json.Unmarshal(b, &report) != nil {
 		t.Fatalf("report: %v\n%s", err, b)
 	}
-	type outcome struct {
-		Status     string            `json:"status"`
-		Violations int64             `json:"violations"`
-		Totals     map[string]string `json:"totals"`
-	}
-	got := map[string]outcome{}
 	for _, c := range report.Checks {
-		o := outcome{Status: c.Status, Violations: c.Violations, Totals: map[string]string{}}
-		for _, tot := range c.Totals {
-			o.Totals[tot.Currency] = tot.Amount
+		if len(c.Expect) == 0 || c.Expect[0].Found == 0 {
+			t.Errorf("check %s: expect %+v", c.Name, c.Expect)
 		}
-		got[c.Name] = o
 	}
-	var want map[string]outcome
-	b, err = os.ReadFile(filepath.Join(example, "expected.json"))
-	if err != nil || json.Unmarshal(b, &want) != nil {
-		t.Fatalf("expected.json: %v", err)
-	}
-	if !reflect.DeepEqual(got, want) {
-		g, _ := json.MarshalIndent(got, "", "  ")
-		t.Errorf("got\n%s\n\nreport:\n%s", g, out)
+
+	// The planted violations, by id and amount, as CI checks them.
+	code, out, errOut = runCLI(t, "test", "-c", path, "-t", filepath.Join(example, "tests.yaml"))
+	if code != exitOK || !strings.Contains(out, "9 tests: 9 passed") {
+		t.Errorf("test: exit %d\n%s\n%s", code, out, errOut)
 	}
 }
 

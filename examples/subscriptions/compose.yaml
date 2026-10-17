@@ -1,6 +1,7 @@
 # A subscription shop with planted money bugs, and money-checks watching it.
 #   docker compose build && docker compose up    serve: http://127.0.0.1:8080/metrics (MC_PORT to change)
 #   docker compose run --rm money-checks run -c /etc/money-checks/checks.yaml
+#   docker compose run --rm money-checks test -c /etc/money-checks/checks.yaml -t /etc/money-checks/tests.yaml
 name: money-checks-example
 
 services:
@@ -57,6 +58,7 @@ services:
       STATS_CLICKHOUSE_URL: http://checks:checks@clickhouse:8123/
     volumes:
       - ./checks.yaml:/etc/money-checks/checks.yaml:ro
+      - ./tests.yaml:/etc/money-checks/tests.yaml:ro
       - ./out:/out
     ports:
       - "127.0.0.1:${MC_PORT:-8080}:8080"

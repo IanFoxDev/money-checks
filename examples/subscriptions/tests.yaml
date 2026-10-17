@@ -1,0 +1,36 @@
+# What each check must find in the shop: every planted bug, by id and amount.
+# CI runs money-checks test with this file against the seeded databases.
+version: 1
+tests:
+  - check: two_renewals_in_one_period
+    violations:
+      - {id: '{"subscription":"sub_a","period":"2026-09"}', amount: 9.99 USD}
+  - check: two_active_subscriptions
+    violations:
+      - {id: u_anna, amount: 9.99 USD}
+      - {id: u_emil, amount: 1200 JPY}
+  - check: provider_txn_recorded_twice
+    violations:
+      - {id: '{"provider":"acmepay","txn":"A-1004"}', amount: 1200 JPY}
+  - check: refund_exceeds_payment
+    violations:
+      - {id: pay_5, amount: 11.00 USD}
+  - check: wallet_balance_matches_entries
+    violations:
+      - {id: u_ben, amount: -1.00 EUR}
+  - check: payment_without_subscription
+    violations: []
+  - check: unbalanced_transactions
+    violations:
+      - {id: 't2:USD', amount: -0.50 USD}
+      - {id: 't5:EUR', amount: -10.00 EUR}
+      - {id: 't5:USD', amount: 10.00 USD}
+  - check: negative_wallet_balance
+    violations:
+      - {id: 'wallet:carl:USD', amount: -3.00 USD}
+  - check: payments_reach_stats
+    violations:
+      # The difference, statistics minus payments.
+      - {id: 2026-09-01/USD, amount: -9.99 USD}
+      - {id: 2026-09-05/USD, amount: -99.00 USD}
+      - {id: 2026-09-08/USD, amount: 5.00 USD}
