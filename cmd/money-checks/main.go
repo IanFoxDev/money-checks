@@ -26,6 +26,7 @@ var version = "dev"
 // Exit codes.
 const (
 	exitOK    = 0
+	exitFound = 1
 	exitError = 2
 )
 
@@ -37,6 +38,9 @@ const usage = `usage:
       run the checks now and every serve.interval; /metrics, /healthz, /readyz on serve.listen
   money-checks known add -c checks.yaml --check NAME --reason TEXT [--until DATE] [--limit N]
       run one check and add its new violations to the known file
+  money-checks test -c checks.yaml -t tests.yaml
+      run the checks the tests file lists against a test database and compare what
+      they find with what they must find; 0 all pass, 1 one does not, 2 a check failed
   money-checks version
 
 exit codes of run: 0 no violations of severity error, 1 violations found, 2 a check failed`
@@ -61,6 +65,8 @@ func run(ctx context.Context, args []string, stdout, stderr io.Writer, open chec
 		return runChecks(ctx, args[1:], stdout, stderr, open, now)
 	case "serve":
 		return serveChecks(ctx, args[1:], stderr, open, now)
+	case "test":
+		return testChecks(ctx, args[1:], stdout, stderr, open, now)
 	case "known":
 		if len(args) > 1 && args[1] == "add" {
 			return knownAdd(ctx, args[2:], stdout, stderr, open, now)
