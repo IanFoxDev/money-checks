@@ -97,11 +97,14 @@ func knownAdd(ctx context.Context, args []string, stdout, stderr io.Writer, open
 	}
 
 	// Every row is a sample, up to one more than the limit, so too many is visible.
+	// The run gets a copy with this check only; cfg keeps all of them, because the
+	// known file it checks below has entries of every check.
 	n := *limit + 1
 	one := *ch
 	one.Samples = &n
-	cfg.Checks = []config.Check{one}
-	r := check.Run(ctx, cfg, check.Full, open, now)
+	runCfg := cfg
+	runCfg.Checks = []config.Check{one}
+	r := check.Run(ctx, runCfg, check.Full, open, now)
 	for _, w := range r.Warnings {
 		fmt.Fprintln(stderr, "warning:", w)
 	}

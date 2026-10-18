@@ -210,3 +210,23 @@ func TestKnownAddCannotAppend(t *testing.T) {
 		}
 	}
 }
+
+// The known file is shared by every check of the configuration: entries of other
+// checks stay valid while one check is added to.
+func TestKnownAddKeepsOtherChecks(t *testing.T) {
+	old := "version: 1\nknown:\n  - {check: other, id: o1, reason: test account}\n"
+	path, knownPath := knownDir(t, old)
+	src := rows{rows: []source.Row{refund("p2", "1.50", "EUR")}}
+	code, out, errOut := knownCLI(t, src, "-c", path, "--check", "refund_twice", "--reason", "imported twice")
+	if code != exitOK || out != "added 1 entries for check refund_twice to known.yaml\n" {
+		t.Fatalf("exit %d, stdout %q, stderr %q", code, out, errOut)
+	}
+	cfg, err := config.Load(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(cfg.Known["other"]) != 1 || len(cfg.Known["refund_twice"]) != 1 {
+		data, _ := os.ReadFile(knownPath)
+		t.Errorf("known %v\n%s", cfg.Known, data)
+	}
+}
