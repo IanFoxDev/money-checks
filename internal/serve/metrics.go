@@ -19,6 +19,8 @@ type metrics struct {
 	duration    *prometheus.GaugeVec
 	errors      *prometheus.CounterVec
 	expect      *prometheus.GaugeVec
+	added       *prometheus.CounterVec
+	oldest      *prometheus.GaugeVec
 }
 
 func newMetrics(reg prometheus.Registerer) *metrics {
@@ -51,8 +53,14 @@ func newMetrics(reg prometheus.Registerer) *metrics {
 		expect: prometheus.NewGaugeVec(prometheus.GaugeOpts{
 			Name: "money_check_expect_value", Help: "The number the expect query of the check found on its last run; side is left or right for a compare check.",
 		}, []string{"check", "scope", "side"}),
+		added: prometheus.NewCounterVec(prometheus.CounterOpts{
+			Name: "money_check_new_violations_total", Help: "Violations the check found that it had not found before, or found with another amount; not counted on the first run.",
+		}, []string{"check"}),
+		oldest: prometheus.NewGaugeVec(prometheus.GaugeOpts{
+			Name: "money_check_oldest_violation_age_seconds", Help: "How long ago serve first saw the oldest violation the check still finds; 0 without violations.",
+		}, []string{"check"}),
 	}
-	reg.MustRegister(m.runs, m.violations, m.known, m.amount, m.up, m.lastSuccess, m.duration, m.errors, m.expect)
+	reg.MustRegister(m.runs, m.violations, m.known, m.amount, m.up, m.lastSuccess, m.duration, m.errors, m.expect, m.added, m.oldest)
 	return m
 }
 
@@ -82,6 +90,28 @@ func (m *metrics) update(res check.Result, now time.Time) {
 	for _, t := range res.Totals {
 		m.amount.WithLabelValues(res.Name, t.Currency, scope).Set(float64(t.Minor))
 	}
+}
+
+// track exports what serve remembers of a check: how many violations were new
+// in this run and the age of the oldest. A check that serve cannot track, above
+// maxTracked, has no age.
+func (m *metrics) track(name string, st *state, added int, now time.Time) {
+	m.added.WithLabelValues(name).Add(float64(added))
+	if !st.complete {
+		m.oldest.DeleteLabelValues(name)
+		return
+	}
+	var oldest time.Time
+	for _, v := range st.seen {
+		if oldest.IsZero() || v.first.Before(oldest) {
+			oldest = v.first
+		}
+	}
+	age := 0.0
+	if !oldest.IsZero() {
+		age = now.Sub(oldest).Seconds()
+	}
+	m.oldest.WithLabelValues(name).Set(age)
 }
 
 func itoa(n int64) string { return strconv.FormatInt(n, 10) }

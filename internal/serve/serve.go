@@ -142,7 +142,16 @@ func (s *Server) Cycle(ctx context.Context) check.Report {
 		if got != nil && got.over && st.complete {
 			s.log.Warn("too many violations to tell the new ones; the check is news only when its state changes", "check", res.Name, "limit", maxTracked)
 		}
+		tracked := st.complete
 		msg, added := st.change(res, got, s.now())
+		if res.Status != check.StatusFailed {
+			// The first full picture is not news: its violations are not new.
+			n := 0
+			if tracked && st.complete {
+				n = len(added)
+			}
+			s.metrics.track(res.Name, st, n, s.now())
+		}
 		if len(added) > 0 {
 			s.log.Info("new violations", "check", res.Name, "count", len(added), "ids", first(added, *s.cfg.Checks[i].Samples))
 		}

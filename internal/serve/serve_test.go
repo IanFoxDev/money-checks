@@ -462,3 +462,34 @@ func TestTooManyToTrack(t *testing.T) {
 		t.Errorf("messages %q", n.msgs)
 	}
 }
+
+// New violations are counted from the second run on; the age is of the oldest
+// violation the check still finds.
+func TestNewAndAgeMetrics(t *testing.T) {
+	src := &script{runs: [][]source.Row{
+		{r("u1", 999, "USD")},
+		{r("u1", 999, "USD"), r("u2", 500, "USD")},
+		{r("u2", 600, "USD")}, // u1 fixed, u2 changed: new, but as old as before
+		{},
+	}}
+	t0 := time.Unix(1791400000, 0)
+	at := t0
+	n := &notes{}
+	cfg, err := config.Parse([]byte(conf), ".")
+	if err != nil {
+		t.Fatal(err)
+	}
+	open := func(context.Context, string, config.Source, func(string)) (source.Source, error) { return src, nil }
+	s := New(cfg, open, n, slog.New(slog.NewTextHandler(io.Discard, nil)), func() time.Time { return at })
+	want := [][]string{
+		{`money_check_new_violations_total{check="two_active_subscriptions"} 0`, `money_check_oldest_violation_age_seconds{check="two_active_subscriptions"} 0`},
+		{`money_check_new_violations_total{check="two_active_subscriptions"} 1`, `money_check_oldest_violation_age_seconds{check="two_active_subscriptions"} 3600`},
+		{`money_check_new_violations_total{check="two_active_subscriptions"} 2`, `money_check_oldest_violation_age_seconds{check="two_active_subscriptions"} 3600`},
+		{`money_check_new_violations_total{check="two_active_subscriptions"} 2`, `money_check_oldest_violation_age_seconds{check="two_active_subscriptions"} 0`},
+	}
+	for i := range src.runs {
+		at = t0.Add(time.Duration(i) * time.Hour)
+		s.Cycle(context.Background())
+		has(t, scrape(t, s), want[i]...)
+	}
+}
