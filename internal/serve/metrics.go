@@ -7,6 +7,7 @@ import (
 	"github.com/prometheus/client_golang/prometheus"
 
 	"github.com/ianfoxdev/money-checks/internal/check"
+	"github.com/ianfoxdev/money-checks/internal/config"
 )
 
 type metrics struct {
@@ -21,9 +22,10 @@ type metrics struct {
 	expect      *prometheus.GaugeVec
 	added       *prometheus.CounterVec
 	oldest      *prometheus.GaugeVec
+	interval    *prometheus.GaugeVec
 }
 
-func newMetrics(reg prometheus.Registerer) *metrics {
+func newMetrics(reg prometheus.Registerer, cfg config.Config) *metrics {
 	m := &metrics{
 		runs: prometheus.NewCounter(prometheus.CounterOpts{
 			Name: "money_checks_runs_total", Help: "Runs of all checks.",
@@ -59,8 +61,19 @@ func newMetrics(reg prometheus.Registerer) *metrics {
 		oldest: prometheus.NewGaugeVec(prometheus.GaugeOpts{
 			Name: "money_check_oldest_violation_age_seconds", Help: "How long ago serve first saw the oldest violation the check still finds; 0 without violations.",
 		}, []string{"check"}),
+		interval: prometheus.NewGaugeVec(prometheus.GaugeOpts{
+			Name: "money_check_interval_seconds", Help: "How often serve runs the check: its every, or serve.interval.",
+		}, []string{"check"}),
 	}
-	reg.MustRegister(m.runs, m.violations, m.known, m.amount, m.up, m.lastSuccess, m.duration, m.errors, m.expect, m.added, m.oldest)
+	reg.MustRegister(m.runs, m.violations, m.known, m.amount, m.up, m.lastSuccess, m.duration, m.errors, m.expect, m.added, m.oldest, m.interval)
+	// For an alert on a check that stopped running, whatever its every.
+	for _, ch := range cfg.Checks {
+		every := ch.Every
+		if every == 0 {
+			every = cfg.Serve.Interval
+		}
+		m.interval.WithLabelValues(ch.Name).Set(every.Seconds())
+	}
 	return m
 }
 

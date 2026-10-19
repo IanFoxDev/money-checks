@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"log/slog"
 	"net/http"
@@ -492,4 +493,53 @@ func TestNewAndAgeMetrics(t *testing.T) {
 		s.Cycle(context.Background())
 		has(t, scrape(t, s), want[i]...)
 	}
+}
+
+// counter is a source that finds nothing and records which check ran when.
+type counter struct {
+	at   func() time.Time
+	runs map[string][]int
+	t0   time.Time
+}
+
+func (c *counter) Query(_ context.Context, ch config.Check, _, _ time.Time, _ func(source.Row) error) error {
+	c.runs[ch.Name] = append(c.runs[ch.Name], int(c.at().Sub(c.t0)/time.Hour))
+	return nil
+}
+
+func (*counter) Close(context.Context) error { return nil }
+
+// A check with every sits out the runs before its turn; a full run runs it
+// whatever its turn, and its turns count from there.
+func TestEvery(t *testing.T) {
+	cfg, err := config.Parse([]byte(`
+version: 1
+sources: {billing: {postgres: {dsn_env: X}}}
+checks:
+  - {name: light, source: billing, query: q, id: id}
+  - {name: heavy, source: billing, query: q, id: id, every: 3h}
+  - {name: daily, source: billing, query: q, id: id, every: 4h}
+serve: {interval: 1h, full_every: 6h}
+`), ".")
+	if err != nil {
+		t.Fatal(err)
+	}
+	t0 := time.Unix(1791400000, 0)
+	at := t0
+	src := &counter{at: func() time.Time { return at }, runs: map[string][]int{}, t0: t0}
+	open := func(context.Context, string, config.Source, func(string)) (source.Source, error) { return src, nil }
+	s := New(cfg, open, nil, slog.New(slog.NewTextHandler(io.Discard, nil)), func() time.Time { return at })
+	for h := range 9 {
+		at = t0.Add(time.Duration(h) * time.Hour)
+		s.Cycle(context.Background())
+	}
+	for name, want := range map[string]string{"light": "[0 1 2 3 4 5 6 7 8]", "heavy": "[0 3 6]", "daily": "[0 4 6]"} {
+		if got := fmt.Sprint(src.runs[name]); got != want {
+			t.Errorf("%s ran at %s, want %s", name, got, want)
+		}
+	}
+	has(t, scrape(t, s),
+		`money_check_interval_seconds{check="heavy"} 10800`,
+		`money_check_interval_seconds{check="light"} 3600`,
+	)
 }

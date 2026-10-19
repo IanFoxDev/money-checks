@@ -31,6 +31,8 @@ type Server struct {
 	metrics *metrics
 	reg     *prometheus.Registry
 	states  map[string]*state
+	// wait is, per check with every, the runs of serve it still sits out.
+	wait map[string]int
 	// lastFull is when the last full run started; zero before the first.
 	lastFull time.Time
 	ready    atomic.Bool
@@ -74,7 +76,7 @@ func New(cfg config.Config, open check.Opener, notify Notifier, log *slog.Logger
 	reg := prometheus.NewRegistry()
 	return &Server{
 		cfg: cfg, open: open, now: now, log: log, notify: notify,
-		metrics: newMetrics(reg), reg: reg, states: map[string]*state{},
+		metrics: newMetrics(reg, cfg), reg: reg, states: map[string]*state{}, wait: map[string]int{},
 	}
 }
 
@@ -96,16 +98,33 @@ func (s *Server) Handler() http.Handler {
 	return mux
 }
 
-// Cycle runs every check once, updates the metrics and notifies about changes.
-// The first run and then one every serve.full_every reads every row; the runs in
-// between read the window of the checks that have one.
+// Cycle runs the checks that are due, updates the metrics and notifies about
+// changes. The first run and then one every serve.full_every reads every row of
+// every check; the runs in between read the window of the checks that have one,
+// and skip a check with every until its turn.
 func (s *Server) Cycle(ctx context.Context) check.Report {
 	scope := check.Window
 	if start := s.now(); s.lastFull.IsZero() || start.Sub(s.lastFull) >= s.cfg.Serve.FullEvery {
 		scope, s.lastFull = check.Full, start
 	}
+	cfg := s.cfg
+	cfg.Checks = nil
+	for _, ch := range s.cfg.Checks {
+		if ch.Every == 0 {
+			cfg.Checks = append(cfg.Checks, ch)
+			continue
+		}
+		// A full run runs every check, so a heavy check is read in full every
+		// full_every whatever its turn; its turns count from there.
+		if scope == check.Window && s.wait[ch.Name] > 0 {
+			s.wait[ch.Name]--
+			continue
+		}
+		s.wait[ch.Name] = int(ch.Every/s.cfg.Serve.Interval) - 1
+		cfg.Checks = append(cfg.Checks, ch)
+	}
 	found := map[string]*rows{}
-	r := check.RunExport(ctx, s.cfg, scope, s.open, s.now, func(name string, v check.Sample) error {
+	r := check.RunExport(ctx, cfg, scope, s.open, s.now, func(name string, v check.Sample) error {
 		if v.Reason != "" {
 			return nil // known
 		}
@@ -153,7 +172,7 @@ func (s *Server) Cycle(ctx context.Context) check.Report {
 			s.metrics.track(res.Name, st, n, s.now())
 		}
 		if len(added) > 0 {
-			s.log.Info("new violations", "check", res.Name, "count", len(added), "ids", first(added, *s.cfg.Checks[i].Samples))
+			s.log.Info("new violations", "check", res.Name, "count", len(added), "ids", first(added, *cfg.Checks[i].Samples))
 		}
 		if msg != "" {
 			s.log.Info("state changed", "check", res.Name, "message", msg)
