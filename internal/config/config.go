@@ -259,6 +259,10 @@ type Serve struct {
 	FullEvery time.Duration `yaml:"full_every"`
 	Listen    string        `yaml:"listen"`
 	Slack     *Slack        `yaml:"slack"`
+	// StateFile, when set, keeps the violations serve has seen across restarts,
+	// so a restart does not post them again. A relative path is relative to the
+	// configuration file.
+	StateFile string `yaml:"state_file"`
 }
 
 // Slack posts when a check starts or stops finding violations, or fails.
@@ -322,6 +326,9 @@ func parse(data []byte, dir string, known bool) (Config, error) {
 	}
 	c.Money = cur
 	errs = append(errs, c.readFiles(dir)...)
+	if c.Serve.StateFile != "" && !filepath.IsAbs(c.Serve.StateFile) {
+		c.Serve.StateFile = filepath.Join(dir, c.Serve.StateFile)
+	}
 	c.applyDefaults()
 	errs = append(errs, c.check()...)
 	if known {

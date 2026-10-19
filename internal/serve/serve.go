@@ -5,6 +5,7 @@ package serve
 import (
 	"context"
 	"errors"
+	"fmt"
 	"log/slog"
 	"net"
 	"net/http"
@@ -154,6 +155,11 @@ func (s *Server) Cycle(ctx context.Context) check.Report {
 			}
 		}
 	}
+	if s.cfg.Serve.StateFile != "" {
+		if err := s.save(); err != nil {
+			s.log.Error("the state file cannot be written; a restart will post every check that is not clean", "file", s.cfg.Serve.StateFile, "error", err)
+		}
+	}
 	s.ready.Store(true)
 	return r
 }
@@ -161,6 +167,15 @@ func (s *Server) Cycle(ctx context.Context) check.Report {
 // Run serves HTTP on the configured address and runs the checks now and then
 // every interval, until ctx is done.
 func (s *Server) Run(ctx context.Context) error {
+	// A state file that cannot be written is a mistake in the deployment, such as
+	// a read-only volume: better to say so now than to post everything after the
+	// next restart.
+	if path := s.cfg.Serve.StateFile; path != "" {
+		s.load()
+		if err := s.save(); err != nil {
+			return fmt.Errorf("serve.state_file: %w", err)
+		}
+	}
 	var lc net.ListenConfig
 	ln, err := lc.Listen(ctx, "tcp", s.cfg.Serve.Listen)
 	if err != nil {
