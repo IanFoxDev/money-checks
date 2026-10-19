@@ -21,6 +21,9 @@ configuration, the report format or the metric names; such changes are marked
 - `serve.state_file`: the violations `serve` has seen are kept in a JSON file
   (mode 0600, written by rename), so a restart posts only what changed while it
   was down instead of every check that is not clean.
+- Metrics `money_check_new_violations_total{check}` and
+  `money_check_oldest_violation_age_seconds{check}`, for an alert on a violation
+  that nobody fixes.
 
 ## [0.4.1] - 2026-10-18
 

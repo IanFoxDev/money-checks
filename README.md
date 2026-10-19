@@ -98,6 +98,8 @@ against a staging copy.
 | `money_check_duration_seconds` | `check`, `scope` | how long the last run took |
 | `money_check_errors_total` | `check` | runs that failed |
 | `money_check_expect_value` | `check`, `scope`, `side` | the number the `expect` query found, below |
+| `money_check_new_violations_total` | `check` | violations `serve` had not seen before, or saw with another amount |
+| `money_check_oldest_violation_age_seconds` | `check` | how long ago `serve` first saw the oldest violation the check still finds |
 | `money_checks_runs_total` | | runs of all checks |
 
 When a run fails, `money_check_up` drops to 0 and the violation gauges keep the last
@@ -120,11 +122,17 @@ groups:
         expr: time() - max by (check) (money_check_last_success_timestamp_seconds) > 3600
         annotations:
           summary: "{{ $labels.check }} has not finished a run for an hour"
+      - alert: MoneyViolationOpenForAWeek
+        expr: money_check_oldest_violation_age_seconds > 7 * 86400
+        annotations:
+          summary: "{{ $labels.check }}: a violation is open for more than a week"
 ```
 
 With `serve.slack.webhook_env` set, a message goes to Slack when a check changes
-state: it starts finding violations, stops finding them, fails or recovers. Not on
-every run. Messages carry the check name, the count and the totals, never rows.
+state (it starts finding violations, stops finding them, fails or recovers) and when
+it finds new violations while it already has some. Not on every run. Messages carry
+the check name, the count and the totals, never rows. `serve.state_file` keeps what
+`serve` has seen across restarts, so a deploy does not post everything again.
 
 ## Read the last day, not the whole table
 
