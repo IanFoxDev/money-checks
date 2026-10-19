@@ -96,12 +96,12 @@ func has(t *testing.T, body string, lines ...string) {
 	}
 }
 
-func TestCycleNotifiesOnChangesOnly(t *testing.T) {
+func TestCycleNotifiesOnNews(t *testing.T) {
 	src := &script{runs: [][]source.Row{
 		{},                    // fine from the start: no message
 		{r("u1", 999, "USD")}, // violations appear
 		{r("u1", 999, "USD")}, // same: no message
-		{r("u1", 999, "USD"), r("u2", 500, "EUR")}, // more, same status: no message
+		{r("u1", 999, "USD"), r("u2", 500, "EUR")}, // one more, while the check already finds one
 		nil, // the query fails
 		nil, // still failing: no message
 		{},  // back, clean
@@ -114,6 +114,7 @@ func TestCycleNotifiesOnChangesOnly(t *testing.T) {
 	}
 	want := []string{
 		"money-checks: two_active_subscriptions found 1 violation (9.99 USD) [error]",
+		"money-checks: two_active_subscriptions found 1 new violation (5.00 EUR), 2 in all [error]",
 		"money-checks: two_active_subscriptions failed: connection reset",
 		"money-checks: two_active_subscriptions runs again and finds no violations",
 		"money-checks: two_active_subscriptions found 1 violation (0.01 USD) [error]",
@@ -361,6 +362,103 @@ func TestExpectMetricAndFailure(t *testing.T) {
 	}
 	want := "money-checks: two_active_subscriptions failed: expect found 0, at least 1 required"
 	if len(n.msgs) != 2 || n.msgs[1] != want {
+		t.Errorf("messages %q", n.msgs)
+	}
+}
+
+// A violation is new when its id was not there or its amount changed; a full run
+// that no longer finds an id says it is fixed.
+func TestNewAndFixed(t *testing.T) {
+	src := &script{runs: [][]source.Row{
+		{r("u1", 999, "USD"), r("u2", 500, "USD")},
+		{r("u1", 999, "USD"), r("u2", 700, "USD"), r("u3", 100, "USD")}, // u2 changed, u3 is new
+		{r("u2", 700, "USD"), r("u3", 100, "USD")},                      // u1 fixed
+		{r("u3", 100, "USD"), r("u4", 1, "USD")},                        // u2 fixed, u4 new
+	}}
+	s, n := newServer(t, src)
+	for range src.runs {
+		s.Cycle(context.Background())
+	}
+	want := []string{
+		"money-checks: two_active_subscriptions found 2 violations (14.99 USD) [error]",
+		"money-checks: two_active_subscriptions found 2 new violations (8.00 USD), 3 in all [error]",
+		"money-checks: two_active_subscriptions: 1 violation fixed (9.99 USD), 2 left [error]",
+		"money-checks: two_active_subscriptions found 1 new violation (0.01 USD), 1 fixed (7.00 USD), 2 in all [error]",
+	}
+	if strings.Join(n.msgs, "\n") != strings.Join(want, "\n") {
+		t.Errorf("messages:\n%s\nwant:\n%s", strings.Join(n.msgs, "\n"), strings.Join(want, "\n"))
+	}
+	// The age of u3 is from the run that first saw it.
+	if v := s.states["two_active_subscriptions"].seen["u3"]; !v.first.Equal(time.Unix(1791400000, 0)) {
+		t.Errorf("u3 first seen %s", v.first)
+	}
+}
+
+// A window run tells the new violations in its window. An old one found again in
+// the window is not news, and the ones outside it are not fixed.
+func TestNewInWindow(t *testing.T) {
+	cfg, err := config.Parse([]byte(strings.Replace(conf, "query: q", "query: select $1\n    window: 1h", 1)+"serve: {full_every: 1h}\n"), ".")
+	if err != nil {
+		t.Fatal(err)
+	}
+	src := &script{runs: [][]source.Row{
+		{r("u1", 999, "USD"), r("u2", 500, "USD")}, // full
+		{r("u2", 500, "USD")},                      // window: u2 is old
+		{r("u2", 500, "USD"), r("u3", 100, "USD")}, // window: u3 is new
+		{r("u1", 999, "USD"), r("u3", 100, "USD")}, // full: u2 fixed
+	}}
+	t0 := time.Unix(1791400000, 0)
+	at := t0
+	n := &notes{}
+	open := func(context.Context, string, config.Source, func(string)) (source.Source, error) { return src, nil }
+	s := New(cfg, open, n, slog.New(slog.NewTextHandler(io.Discard, nil)), func() time.Time { return at })
+	for _, m := range []int{0, 10, 20, 60} {
+		at = t0.Add(time.Duration(m) * time.Minute)
+		s.Cycle(context.Background())
+	}
+	want := []string{
+		"money-checks: two_active_subscriptions found 2 violations (14.99 USD) [error]",
+		"money-checks: two_active_subscriptions found 1 new violation (1.00 USD) in the last 1h [error]",
+		"money-checks: two_active_subscriptions: 1 violation fixed (5.00 USD), 2 left [error]",
+	}
+	if strings.Join(n.msgs, "\n") != strings.Join(want, "\n") {
+		t.Errorf("messages:\n%s\nwant:\n%s", strings.Join(n.msgs, "\n"), strings.Join(want, "\n"))
+	}
+}
+
+// For a compare check the id is the key and the amount the difference: a day
+// whose difference grew is new.
+func TestNewKeysOfCompare(t *testing.T) {
+	res := check.Result{Name: "daily", Source: "billing", RightSource: "stats", Severity: "error", Scope: check.Full, Status: check.StatusViolations}
+	st := &state{found: map[check.Scope]bool{}}
+	d := func(minor int64) *check.Money { return &check.Money{Currency: "USD", Minor: minor, Exponent: 2} }
+	now := time.Unix(1791400000, 0)
+	res.Violations = 2
+	st.change(res, &rows{ids: map[string]*check.Money{"d1": d(-500), "d2": d(100)}}, now)
+	res.Violations = 2
+	msg, added := st.change(res, &rows{ids: map[string]*check.Money{"d1": d(-800), "d2": d(100)}}, now)
+	if want := "money-checks: daily found 1 new key where billing and stats differ (8.00 USD), 2 in all [error]"; msg != want || len(added) != 1 {
+		t.Errorf("%q %v", msg, added)
+	}
+	res.Violations = 1
+	msg, _ = st.change(res, &rows{ids: map[string]*check.Money{"d1": d(-800)}}, now)
+	if want := "money-checks: daily: 1 key no longer differs (1.00 USD), 1 left [error]"; msg != want {
+		t.Errorf("%q", msg)
+	}
+}
+
+// Above maxTracked violations a check is news only when its state changes.
+func TestTooManyToTrack(t *testing.T) {
+	many := make([]source.Row, maxTracked+1)
+	for i := range many {
+		many[i] = r("u"+itoa(int64(i)), 1, "USD")
+	}
+	src := &script{runs: [][]source.Row{{r("u1", 1, "USD")}, many, append(many, r("x", 1, "USD"))}}
+	s, n := newServer(t, src)
+	for range src.runs {
+		s.Cycle(context.Background())
+	}
+	if len(n.msgs) != 1 || s.states["two_active_subscriptions"].complete {
 		t.Errorf("messages %q", n.msgs)
 	}
 }
