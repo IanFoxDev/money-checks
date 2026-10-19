@@ -110,6 +110,9 @@ type Check struct {
 	// query gets the start of the window as $1 (postgres), $$since (mongodb) or
 	// {since:DateTime64(6, 'UTC')} (clickhouse).
 	Window time.Duration `yaml:"window"`
+	// Every, when set, makes serve run the check every Every instead of every
+	// serve.interval; a multiple of it. A full run still runs every check.
+	Every time.Duration `yaml:"every"`
 	// Settle, on a compare check, leaves out the rows of the last Settle on both
 	// sides, which are still on their way from one to the other: the query gets
 	// the end as $2 (postgres), $$until (mongodb) or {until:DateTime64(6, 'UTC')}
@@ -567,6 +570,15 @@ func (c *Config) checkCheck(where string, ch Check) []error {
 	case ch.Window > 0 && ch.Window < c.Serve.Interval:
 		// Rows written between two runs would be missed until the next full pass.
 		add("window: at least serve.interval (%s), got %s", c.Serve.Interval, ch.Window)
+	}
+	switch every := ch.Every; {
+	case every < 0:
+		add("every: must be positive")
+	case every > 0 && (every < c.Serve.Interval || every%c.Serve.Interval != 0):
+		add("every: a multiple of serve.interval (%s), got %s", c.Serve.Interval, every)
+	case every > 0 && ch.Window > 0 && ch.Window < every:
+		// As for serve.interval: the rows between two runs must be in the window.
+		add("window: at least every (%s), got %s", every, ch.Window)
 	}
 	if n := *ch.Samples; n < 0 || n > MaxSamples {
 		add("samples: want 0..%d, got %d", MaxSamples, n)

@@ -268,6 +268,9 @@ checks:
   - {name: no_param, source: ledger, query: select 1, id: id, window: 24h}
   - {name: short, source: ledger, query: select $1, id: id, window: 30m}
   - {name: negative, source: ledger, query: select $1, id: id, window: -1h}
+  - {name: odd_every, source: ledger, query: select 1, id: id, every: 90m}
+  - {name: short_every, source: ledger, query: select 1, id: id, every: 30m}
+  - {name: window_every, source: ledger, query: select $1, id: id, window: 2h, every: 6h}
 serve: {interval: 1h, full_every: 30m}
 `
 	_, err = Parse([]byte(bad), ".")
@@ -284,6 +287,9 @@ serve: {interval: 1h, full_every: 30m}
 		"check ch_seconds: query: write {since:DateTime64(6, 'UTC')}, not {since:DateTime('UTC')}",
 		"check short: window: at least serve.interval (1h0m0s), got 30m0s",
 		"check negative: window: must be positive",
+		"check odd_every: every: a multiple of serve.interval (1h0m0s), got 1h30m0s",
+		"check short_every: every: a multiple of serve.interval (1h0m0s), got 30m0s",
+		"check window_every: window: at least every (6h0m0s), got 2h0m0s",
 		"serve.full_every: at least serve.interval (1h0m0s), got 30m0s",
 	} {
 		if !strings.Contains(err.Error(), want) {
