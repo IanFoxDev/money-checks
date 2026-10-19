@@ -393,12 +393,21 @@ serve:
 
 Each run opens the sources again, so a database that restarts between runs does not
 need money-checks to restart. With `slack`, a message is posted when a check starts
-finding violations, stops finding them, fails or runs again after failing. The first
-run posts only about checks that are not clean.
+finding violations, stops finding them, fails or runs again after failing, and when
+it finds new violations while it already has some. The first run posts only about
+checks that are not clean.
+
+A violation is new when its id was not found by the last run, or was found with
+another amount, as the known file treats a changed amount: "found 2 new violations
+(59.98 USD), 151 in all". Known violations are not news. The message gives the
+count and the total; the new ids go to the log. A check with more than 100000
+violations is news only when its state changes.
 
 The first run and then one every `full_every` read every row; the runs in between
-read the window of the checks that have one. A window run posts new violations
-("found 1 violation (5.00 EUR) in the last 24h"), not that they are gone.
+read the window of the checks that have one. A window run posts the new violations
+of its window ("found 1 new violation (5.00 EUR) in the last 24h"), not that older
+ones are gone: only a full run says a violation is fixed ("1 violation fixed (9.99
+USD), 150 left"). Why: [adr/0006-serve-remembers-violations.md](adr/0006-serve-remembers-violations.md).
 
 ## known_file
 

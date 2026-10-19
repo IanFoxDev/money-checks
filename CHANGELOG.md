@@ -8,6 +8,14 @@ configuration, the report format or the metric names; such changes are marked
 
 ## [Unreleased]
 
+### Changed
+
+- `serve` remembers the violations of each check by id and posts new ones also
+  when the check already finds violations: "found 2 new violations (59.98 USD),
+  151 in all". A changed amount makes a violation new. A full run posts the ones
+  that are gone: "1 violation fixed (9.99 USD), 150 left". Before, a check that
+  already had violations stayed silent about new ones. See ADR 0006.
+
 ## [0.4.1] - 2026-10-18
 
 ### Fixed
