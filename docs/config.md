@@ -102,6 +102,7 @@ A list. Checks run in this order, one at a time.
 | `samples` | | rows shown in the report; overrides `defaults.samples` |
 | `timeout` | | overrides `defaults.timeout` |
 | `window` | | `24h`: `serve` and `run --window` read only the rows since then, below |
+| `every` | | `6h`: `serve` runs the check every 6 hours instead of every `serve.interval`, a multiple of it; a full run still runs it, below |
 | `compare` | | two sides whose totals must match, below; replaces `source`, the query, `id`, `amount`, `show` and `mask` |
 | `settle` | compare | `15m`: both sides leave out the rows of the last 15 minutes, below |
 | `expect` | | a query that must find data before the check runs, below; on a compare check, on each side |
@@ -403,6 +404,15 @@ another amount, as the known file treats a changed amount: "found 2 new violatio
 (59.98 USD), 151 in all". Known violations are not news. The message gives the
 count and the total; the new ids go to the log. A check with more than 100000
 violations is news only when its state changes.
+
+A check with `every` runs less often than the others: `every: 6h` with `interval: 1h`
+runs it every sixth run. Use it for a check that is heavy on the database and whose
+answer does not change by the hour. A full run, at start and every `full_every`, runs
+every check whatever its turn, and its turns count from there, so every check is read
+in full at least every `full_every`. A window must cover the time between two runs,
+so a check with `every` and `window` needs `window` at least `every`. `run` ignores
+`every`. `money_check_interval_seconds{check}` says how often each check runs, for an
+alert on checks that stopped running (README).
 
 The first run and then one every `full_every` read every row; the runs in between
 read the window of the checks that have one. A window run posts the new violations

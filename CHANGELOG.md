@@ -15,6 +15,9 @@ configuration, the report format or the metric names; such changes are marked
   151 in all". A changed amount makes a violation new. A full run posts the ones
   that are gone: "1 violation fixed (9.99 USD), 150 left". Before, a check that
   already had violations stayed silent about new ones. See ADR 0006.
+- The alert in the README on checks that stopped running compares with
+  `money_check_interval_seconds` instead of a fixed hour, so a check with `every`
+  does not fire it.
 
 ### Added
 
@@ -24,6 +27,9 @@ configuration, the report format or the metric names; such changes are marked
 - Metrics `money_check_new_violations_total{check}` and
   `money_check_oldest_violation_age_seconds{check}`, for an alert on a violation
   that nobody fixes.
+- `every` on a check: `serve` runs a heavy check every `every`, a multiple of
+  `serve.interval`, instead of on every run; a full run still runs it.
+  `money_check_interval_seconds{check}` says how often each check runs.
 
 ## [0.4.1] - 2026-10-18
 
