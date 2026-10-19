@@ -24,8 +24,8 @@ func TestRunExport(t *testing.T) {
 	var got []string
 	r := RunExport(context.Background(), c, Full, func(context.Context, string, config.Source, func(string)) (source.Source, error) {
 		return f, nil
-	}, clock(), func(s Sample) error {
-		parts := []string{s.ID, s.Amount.String()}
+	}, clock(), func(name string, s Sample) error {
+		parts := []string{name, s.ID, s.Amount.String()}
 		for _, f := range s.Fields {
 			parts = append(parts, f.Name+"="+f.Value)
 		}
@@ -33,10 +33,10 @@ func TestRunExport(t *testing.T) {
 		return nil
 	})
 	want := []string{
-		"s1 26.99 USD email=a***@example.com n=2 missing=(missing) reason=",
-		"s2 10.10 USD email=b***@example.com n=2 missing=(missing) reason=refunded",
-		"s3 5.00 EUR email=null n=3 missing=(missing) reason=",
-		"s4 1.00 USD email=e***@example.com n=2 missing=(missing) reason=",
+		"rebills s1 26.99 USD email=a***@example.com n=2 missing=(missing) reason=",
+		"rebills s2 10.10 USD email=b***@example.com n=2 missing=(missing) reason=refunded",
+		"rebills s3 5.00 EUR email=null n=3 missing=(missing) reason=",
+		"rebills s4 1.00 USD email=e***@example.com n=2 missing=(missing) reason=",
 	}
 	if strings.Join(got, "\n") != strings.Join(want, "\n") {
 		t.Errorf("exported\n%s\nwant\n%s", strings.Join(got, "\n"), strings.Join(want, "\n"))
@@ -56,7 +56,7 @@ func TestRunExportError(t *testing.T) {
 	f := &fake{rows: map[string][]source.Row{"rebills": {row("id,amount,currency,email,n", "s1", "1", "USD", "a@b", int64(2))}}}
 	r := RunExport(context.Background(), c, Full, func(context.Context, string, config.Source, func(string)) (source.Source, error) {
 		return f, nil
-	}, clock(), func(Sample) error { return errors.New("disk full") })
+	}, clock(), func(string, Sample) error { return errors.New("disk full") })
 	if res := r.Results[0]; res.Status != StatusFailed || !strings.Contains(res.Error, "disk full") {
 		t.Errorf("%+v", res)
 	}

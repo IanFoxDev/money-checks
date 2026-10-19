@@ -139,9 +139,10 @@ func Run(ctx context.Context, cfg config.Config, scope Scope, open Opener, now f
 }
 
 // RunExport is Run that also calls export for every violation, new and known, in
-// the order the checks find them, with the fields of a sample: a list of every
-// row without holding them all in memory. An error from export fails the check.
-func RunExport(ctx context.Context, cfg config.Config, scope Scope, open Opener, now func() time.Time, export func(Sample) error) Report {
+// the order the checks find them, with the name of the check and the fields of a
+// sample: a list of every row without holding them all in memory. An error from
+// export fails the check.
+func RunExport(ctx context.Context, cfg config.Config, scope Scope, open Opener, now func() time.Time, export func(check string, s Sample) error) Report {
 	r := Report{StartedAt: now().UTC()}
 	warn := func(msg string) { r.Warnings = append(r.Warnings, msg) }
 	type opened struct {
@@ -283,7 +284,7 @@ type collector struct {
 	// abs adds up the absolute amounts: the differences of a compare check.
 	abs bool
 	// export, when set, gets every violation.
-	export func(Sample) error
+	export func(string, Sample) error
 
 	totals, knownTotals map[string]*Money
 	seen                map[string]bool
@@ -328,7 +329,7 @@ func (c *collector) add(s Sample, fields func() []Field) error {
 		*samples = append(*samples, s)
 	}
 	if c.export != nil {
-		return c.export(s)
+		return c.export(c.ch.Name, s)
 	}
 	return nil
 }
@@ -392,6 +393,24 @@ func add(totals map[string]*Money, m Money) error {
 	}
 	t.Minor += m.Minor
 	return nil
+}
+
+// Total adds up amounts per currency, sorted by currency. abs adds up their
+// absolute values, as the totals of a compare check do.
+func Total(ms []Money, abs bool) ([]Money, error) {
+	totals := map[string]*Money{}
+	for _, m := range ms {
+		if abs && m.Minor < 0 {
+			if m.Minor == math.MinInt64 {
+				return nil, fmt.Errorf("the difference in %s does not fit in int64 minor units", m.Currency)
+			}
+			m.Minor = -m.Minor
+		}
+		if err := add(totals, m); err != nil {
+			return nil, err
+		}
+	}
+	return sorted(totals), nil
 }
 
 func sorted(totals map[string]*Money) []Money {

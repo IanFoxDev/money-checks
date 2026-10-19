@@ -125,9 +125,9 @@ func runChecks(ctx context.Context, args []string, stdout, stderr io.Writer, ope
 		fmt.Fprintln(stderr, err)
 		return exitError
 	}
-	var each func(check.Sample) error
+	var each func(string, check.Sample) error
 	if len(exp.files) > 0 {
-		each = exp.write
+		each = func(_ string, s check.Sample) error { return exp.write(s) }
 	}
 	r := check.RunExport(ctx, cfg, scope, open, now, each)
 	if len(exp.files) > 0 {
