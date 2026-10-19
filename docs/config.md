@@ -387,6 +387,7 @@ serve:
   interval: 10m            # default 10m, at least 1m
   full_every: 24h          # default 24h, at least interval: a full pass of checks with a window
   listen: ":8080"          # default :8080
+  state_file: state.json  # optional: what serve has seen survives a restart, below
   slack:
     webhook_env: SLACK_WEBHOOK_URL
 ```
@@ -408,6 +409,18 @@ read the window of the checks that have one. A window run posts the new violatio
 of its window ("found 1 new violation (5.00 EUR) in the last 24h"), not that older
 ones are gone: only a full run says a violation is fixed ("1 violation fixed (9.99
 USD), 150 left"). Why: [adr/0006-serve-remembers-violations.md](adr/0006-serve-remembers-violations.md).
+
+Without `state_file` this lives in memory, and the first run after a start posts
+every check that is not clean again. With it, `serve` reads the file at start and
+writes it after every run, so a restart posts only what changed while it was down.
+A relative path is relative to the configuration file. The file is JSON: per check,
+the ids of its violations with their amounts and when `serve` first saw them. It is
+written to a temporary file next to it and renamed, with mode 0600, because it holds
+ids and amounts as the reports do; keep it where the reports go, on a volume of its
+own in a container. `serve` does not start when it cannot write the file. A file it
+cannot read, or of another version, is a warning, and `serve` starts as without it.
+Checks that are no longer in the configuration are dropped from it. Run one `serve`
+per state file.
 
 ## known_file
 

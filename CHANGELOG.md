@@ -16,6 +16,12 @@ configuration, the report format or the metric names; such changes are marked
   that are gone: "1 violation fixed (9.99 USD), 150 left". Before, a check that
   already had violations stayed silent about new ones. See ADR 0006.
 
+### Added
+
+- `serve.state_file`: the violations `serve` has seen are kept in a JSON file
+  (mode 0600, written by rename), so a restart posts only what changed while it
+  was down instead of every check that is not clean.
+
 ## [0.4.1] - 2026-10-18
 
 ### Fixed
