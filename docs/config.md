@@ -92,9 +92,9 @@ A list. Checks run in this order, one at a time.
 | `severity` | | `error` (default) or `warn`. Only `error` sets exit code 1 |
 | `collection` | mongodb | the collection the pipeline runs on |
 | `pipeline` | mongodb | a list of stages, or `pipeline_file` |
-| `pipeline_file` | mongodb | a JSON or YAML file with the stages, relative to the config file |
+| `pipeline_file` | mongodb | a JSON or YAML file with the stages, relative to the config file or absolute |
 | `query` | postgres, clickhouse | one SQL statement, or `query_file` |
-| `query_file` | postgres, clickhouse | a file with the statement, relative to the config file |
+| `query_file` | postgres, clickhouse | a file with the statement, relative to the config file or absolute |
 | `id` | | the column that identifies a row; default `_id` for mongodb, required for postgres and clickhouse |
 | `amount` | | where the money of a row is, below; without it the check only counts rows |
 | `show` | | columns shown next to the id in the report |
@@ -187,6 +187,10 @@ compared with (`timestamptz` or `timestamp`, in UTC). On MongoDB it is the varia
     pipeline:
       - $match: {$expr: {$gte: ["$paid_at", "$$since"]}}
 ```
+
+A variable of your own named `since`, bound by `let` of `$lookup`, `vars` of `$let` or
+`as` of `$map`, `$filter` and `$reduce`, is yours inside that stage or operator, not
+the start of the window.
 
 On ClickHouse it is the query parameter `{since:DateTime64(6, 'UTC')}`, exactly this
 type: another one reads the start in the server's time zone or drops the
@@ -314,8 +318,11 @@ The end is `$$until` in a pipeline, `{until:DateTime64(6, 'UTC')}` on ClickHouse
 `$2` on PostgreSQL. A PostgreSQL query with `$2` uses `$1` too, because PostgreSQL
 cannot tell the type of `$2` alone; without a window `$1` is
 `0001-01-01T00:00:00Z`. Every side of a check with `settle` must use the end, and
-a query that uses it needs `settle`. `settle` is shorter than `window`, and only
-`compare` checks have it: a check of one database sees its rows as they are written.
+a query that uses it needs `settle`. Only `compare` checks have it: a check of one
+database sees its rows as they are written. `settle` needs no `window`: a compare of
+the last 30 whole days, which picks its own start from the current time, can take
+its end from `settle` alone, and both sides then end at the same moment. With a
+window, `settle` is shorter than it.
 
 Mind the buckets. When one side keeps daily totals, a row for today is partial
 until the day ends, whatever `settle` says. Compare whole days on both sides, as
@@ -435,7 +442,7 @@ per state file.
 ## known_file
 
 Violations someone has looked at and accepted: a double charge that support refunded
-by hand, a test account. The path is relative to `checks.yaml`. Why this is a
+by hand, a test account. The path is relative to `checks.yaml`, or absolute. Why this is a
 separate file and not a filter in the query: `docs/adr/0002-known-violations.md`.
 
 ```yaml
@@ -462,6 +469,11 @@ status, the exit code or Slack. The report lists it in a separate table with the
 reason, and `/metrics` counts it in `money_check_known_violations`. A row whose entry
 expired or whose amount changed counts again, with a note that says which. An entry
 the check no longer finds is listed under "no longer found", so it can be removed.
+
+One known file can serve several configurations, such as one per database and one
+for `serve` with all the checks. An entry for a check the configuration does not
+have is left out with a warning, not an error: it cannot hide a violation, and a
+misspelt check name shows itself as a violation that still counts.
 
 `serve` reads the file at start; restart it after a change. `known add` writes the
 entries for you after a first run, see below.

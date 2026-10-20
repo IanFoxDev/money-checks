@@ -31,6 +31,17 @@ configuration, the report format or the metric names; such changes are marked
   `serve.interval`, instead of on every run; a full run still runs it.
   `money_check_interval_seconds{check}` says how often each check runs.
 
+### Fixed
+
+- An entry of the known file for a check the configuration does not have is a
+  warning and is left out, instead of an error that stops the run. One known file
+  can now serve several configurations.
+- An absolute path in `known_file`, `query_file` and `pipeline_file` was joined to
+  the directory of the configuration and not found.
+- A variable of the pipeline named `since` or `until`, bound by `let` of `$lookup`,
+  `vars` of `$let` or `as` of `$map`, `$filter` and `$reduce`, was taken for the
+  parameter of the window or of `settle`, and the configuration was refused.
+
 ## [0.4.1] - 2026-10-18
 
 ### Fixed
