@@ -52,6 +52,37 @@ curl -s 127.0.0.1:8080/metrics | grep '^money_check_violations'
 
 Set `MC_PORT` if 8080 is taken on your machine.
 
+## What serve posts
+
+`serve` without Slack writes what it would post to its log, as `"msg":"state changed"`.
+The first run posts every check that finds violations, eight lines such as:
+
+```
+money-checks: two_renewals_in_one_period found 1 violation (9.99 USD) [error]
+```
+
+From then on a check is posted when it finds violations it has not seen, also when
+it already had some. With `serve.state_file` it remembers them across restarts. CI
+does this with a copy of `checks.yaml` that has `state_file: /out/state.json`:
+
+1. The first start posts the eight lines above.
+2. While `serve` is down, a second renewal of `sub_d` for 2026-09 is inserted.
+3. The next start posts one line, not eight:
+   `two_renewals_in_one_period found 1 new violation (19.99 EUR), 2 in all [error]`.
+4. One more start, with nothing new, posts nothing.
+
+To try it, give the container your user so it can write `out/`:
+
+```
+mkdir -p out
+{ cat checks.yaml; printf 'serve:\n  state_file: /out/state.json\n'; } > out/serve.yaml
+MC_UID=$(id -u) MC_GID=$(id -g) docker compose run --rm money-checks serve -c /out/serve.yaml
+```
+
+The file holds the ids and amounts of the violations, with mode 0600. Without it a
+restart posts all eight lines again, which after a few deploys is how a channel gets
+muted.
+
 To check that every check finds exactly the planted bugs:
 
 ```

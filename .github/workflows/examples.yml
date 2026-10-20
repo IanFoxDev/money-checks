@@ -50,5 +50,38 @@ jobs:
           curl -s 127.0.0.1:8080/metrics > metrics.txt
           grep -x 'money_check_violations{check="unbalanced_transactions",scope="full",severity="error"} 3' metrics.txt
           grep -x 'money_check_amount_minor_units{check="payments_reach_stats",currency="USD",scope="full"} 11399' metrics.txt
+      - name: serve with a state file posts only what is new
+        run: |
+          docker compose stop money-checks
+          { cat checks.yaml; printf 'serve:\n  state_file: /out/state.json\n'; } > out/serve.yaml
+          serve() {
+            # One start of serve: wait for its first run, stop it, keep the log.
+            MC_UID=$(id -u) MC_GID=$(id -g) docker compose run -d --name mc-state money-checks \
+              serve -c /out/serve.yaml > /dev/null
+            for i in $(seq 1 60); do
+              test "$(docker logs mc-state 2>&1 | grep -c '"msg":"check finished"')" -eq 9 && break
+              sleep 1
+            done
+            docker logs mc-state > "out/$1.log" 2>&1
+            docker rm -f mc-state > /dev/null
+            grep '"msg":"state changed"' "out/$1.log" || true
+          }
+          # The first start posts every check that finds violations.
+          serve first
+          test "$(grep -c '"msg":"state changed"' out/first.log)" -eq 8
+          # While serve is down, sub_d is charged twice for 2026-09. created_at is
+          # now, inside settle, so payments_reach_stats does not see it yet.
+          docker compose exec -T mongo mongosh -u root -p root --quiet --eval '
+            db.getSiblingDB("shop").payments.insertOne({_id: "pay_20", subscription_id: "sub_d",
+              user_id: "u_carl", kind: "renewal", status: "succeeded", amount: 19.99, currency: "EUR",
+              period: "2026-09", provider: "globexpay", provider_txn: "G-2009", created_at: new Date()})'
+          # The restart posts that one, although the check already had a violation.
+          serve second
+          test "$(grep -c '"msg":"state changed"' out/second.log)" -eq 1
+          grep -q 'two_renewals_in_one_period found 1 new violation (19.99 EUR), 2 in all' out/second.log
+          # A restart with nothing new posts nothing.
+          serve third
+          if grep -q '"msg":"state changed"' out/third.log; then exit 1; fi
+          test "$(stat -c %a out/state.json)" = 600
       - if: always()
         run: docker compose down -v
