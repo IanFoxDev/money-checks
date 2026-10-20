@@ -123,7 +123,6 @@ known:
 	for _, want := range []string{
 		"known_file known.yaml: version: want 1, got 2",
 		"known[0]: reason: required",
-		`known[1]: check: no check is named "nope"`,
 		"known[2]: check: required",
 		"known[3]: id: required",
 		"known[4]: amount: check paid_without_access has no amount",
@@ -145,5 +144,38 @@ func TestKnownFileErrors(t *testing.T) {
 	}
 	if _, err := parseKnown(t, "version: 1\nknown:\n  - check: refund_twice\n    ids: p1\n"); err == nil || !strings.Contains(err.Error(), "field ids not found") {
 		t.Errorf("unknown key: %v", err)
+	}
+}
+
+// An entry for a check this configuration does not have is left out with a
+// warning: one known file can serve several configurations.
+func TestKnownOfAnotherConfiguration(t *testing.T) {
+	c, err := parseKnown(t, "version: 1\nknown:\n  - {check: other_db_check, id: x1, reason: r}\n  - {check: refund_twice, id: p1, reason: r}\n")
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := `known_file known.yaml: known[0]: no check is named "other_db_check"; the entry is left out`
+	if len(c.Warnings) != 1 || c.Warnings[0] != want || len(c.Known) != 1 {
+		t.Errorf("warnings %q, known %v", c.Warnings, c.Known)
+	}
+}
+
+// Files the configuration names are relative to it, or absolute.
+func TestAbsolutePaths(t *testing.T) {
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, "k.yaml"), []byte("version: 1\nknown: []\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "q.sql"), []byte("select 1"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	conf := strings.Replace(withKnown, "known_file: known.yaml", "known_file: "+filepath.Join(dir, "k.yaml"), 1)
+	conf = strings.Replace(conf, "    query: select 1\n    id: user_id", "    query_file: "+filepath.Join(dir, "q.sql")+"\n    id: user_id", 1)
+	c, err := Parse([]byte(conf), t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if c.Checks[1].Query != "select 1" {
+		t.Errorf("query %q", c.Checks[1].Query)
 	}
 }

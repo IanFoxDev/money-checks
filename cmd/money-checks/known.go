@@ -141,7 +141,7 @@ func knownAdd(ctx context.Context, args []string, stdout, stderr io.Writer, open
 		return fail("known add: %v", err)
 	}
 
-	file := filepath.Join(filepath.Dir(*path), cfg.KnownFile)
+	file := config.Path(filepath.Dir(*path), cfg.KnownFile)
 	data, err := os.ReadFile(file)
 	if err != nil {
 		return fail("known add: %v", err)
@@ -182,7 +182,7 @@ func startKnown(path string) (string, error) {
 	if yaml.Unmarshal(data, &c) != nil || c.KnownFile == "" {
 		return "", nil // config.Load says what is wrong
 	}
-	file := filepath.Join(filepath.Dir(path), c.KnownFile)
+	file := config.Path(filepath.Dir(path), c.KnownFile)
 	f, err := os.OpenFile(file, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0o644)
 	if errors.Is(err, fs.ErrExist) {
 		return "", nil

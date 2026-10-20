@@ -139,6 +139,7 @@ func runChecks(ctx context.Context, args []string, stdout, stderr io.Writer, ope
 			return exitError
 		}
 	}
+	r.Warnings = append(r.Warnings, cfg.Warnings...)
 	if names := cfg.WithoutExpect(); len(names) > 0 {
 		r.Warnings = append(r.Warnings, check.WithoutExpectWarning(names))
 	}

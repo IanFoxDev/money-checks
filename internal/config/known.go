@@ -5,7 +5,6 @@ import (
 	"errors"
 	"fmt"
 	"os"
-	"path/filepath"
 	"strings"
 	"time"
 
@@ -54,40 +53,49 @@ func (c *Config) readKnown(dir string) []error {
 	if c.KnownFile == "" {
 		return nil
 	}
-	data, err := os.ReadFile(filepath.Join(dir, c.KnownFile))
+	data, err := os.ReadFile(Path(dir, c.KnownFile))
 	if err != nil {
 		return []error{fmt.Errorf("known_file: %w", err)}
 	}
-	known, errs := c.parseKnown(data)
-	c.Known = known
+	known, warnings, errs := c.parseKnown(data)
+	c.Known, c.Warnings = known, append(c.Warnings, warnings...)
 	return errs
 }
 
 // ParseKnown reads data as the known file of this configuration, without changing
 // it: a tool that edits the file checks the result before writing it.
 func (c Config) ParseKnown(data []byte) (map[string]map[string]Known, error) {
-	known, errs := c.parseKnown(data)
+	known, _, errs := c.parseKnown(data)
 	return known, errors.Join(errs...)
 }
 
-func (c Config) parseKnown(data []byte) (map[string]map[string]Known, []error) {
+// parseKnown also says which entries name a check this configuration does not
+// have. They are left out with a warning, not an error: such an entry cannot hide
+// a violation, and one known file may serve several configurations, such as one
+// per database and one for serve.
+func (c Config) parseKnown(data []byte) (map[string]map[string]Known, []string, []error) {
 	dec := yaml.NewDecoder(bytes.NewReader(data))
 	dec.KnownFields(true)
 	var f knownFile
 	if err := dec.Decode(&f); err != nil {
-		return nil, []error{fmt.Errorf("known_file %s: %w", c.KnownFile, err)}
+		return nil, nil, []error{fmt.Errorf("known_file %s: %w", c.KnownFile, err)}
 	}
 	checks := map[string]Check{}
 	for _, ch := range c.Checks {
 		checks[ch.Name] = ch
 	}
 	var errs []error
+	var warnings []string
 	if f.Version != 1 {
 		errs = append(errs, fmt.Errorf("known_file %s: version: want 1, got %d", c.KnownFile, f.Version))
 	}
 	known := map[string]map[string]Known{}
 	for i, e := range f.Known {
 		where := fmt.Sprintf("known_file %s: known[%d]", c.KnownFile, i)
+		if _, ok := checks[e.Check]; e.Check != "" && !ok {
+			warnings = append(warnings, fmt.Sprintf("%s: no check is named %q; the entry is left out", where, e.Check))
+			continue
+		}
 		k, entryErrs := c.knownEntry(e, checks)
 		for _, err := range entryErrs {
 			errs = append(errs, fmt.Errorf("%s: %w", where, err))
@@ -104,7 +112,7 @@ func (c Config) parseKnown(data []byte) (map[string]map[string]Known, []error) {
 		}
 		known[k.Check][k.ID] = k
 	}
-	return known, errs
+	return known, warnings, errs
 }
 
 func (c Config) knownEntry(e knownEntry, checks map[string]Check) (Known, []error) {

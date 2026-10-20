@@ -32,6 +32,9 @@ type Config struct {
 	Money money.Currencies `yaml:"-"`
 	// Known is KnownFile read: check name, then id.
 	Known map[string]map[string]Known `yaml:"-"`
+	// Warnings are what is odd in the files but not wrong enough to stop: an
+	// entry of the known file for a check this configuration does not have.
+	Warnings []string `yaml:"-"`
 }
 
 // Defaults apply to every check that does not set its own value.
@@ -214,7 +217,7 @@ func (ch Check) ExpectCheck(kind string) Check {
 func (ch Check) uses(kind, param string) bool {
 	switch kind {
 	case "mongodb":
-		return hasValue(&ch.Pipeline, "$$"+param)
+		return usesVar(&ch.Pipeline, param)
 	case "clickhouse":
 		return clickhouseParam(param).MatchString(ch.Query)
 	default:
@@ -329,8 +332,8 @@ func parse(data []byte, dir string, known bool) (Config, error) {
 	}
 	c.Money = cur
 	errs = append(errs, c.readFiles(dir)...)
-	if c.Serve.StateFile != "" && !filepath.IsAbs(c.Serve.StateFile) {
-		c.Serve.StateFile = filepath.Join(dir, c.Serve.StateFile)
+	if c.Serve.StateFile != "" {
+		c.Serve.StateFile = Path(dir, c.Serve.StateFile)
 	}
 	c.applyDefaults()
 	errs = append(errs, c.check()...)
@@ -376,6 +379,15 @@ func (c *Config) readFiles(dir string) []error {
 	return errs
 }
 
+// Path is a file the configuration names: relative to the directory of the
+// configuration, or absolute.
+func Path(dir, file string) string {
+	if filepath.IsAbs(file) {
+		return file
+	}
+	return filepath.Join(dir, file)
+}
+
 // readFiles reads query_file into query and pipeline_file into pipeline.
 func readFiles(dir string, query *string, queryFile string, pipeline *yaml.Node, pipelineFile string) error {
 	if queryFile != "" && *query != "" {
@@ -385,14 +397,14 @@ func readFiles(dir string, query *string, queryFile string, pipeline *yaml.Node,
 		return errors.New("set pipeline or pipeline_file, not both")
 	}
 	if queryFile != "" {
-		b, err := os.ReadFile(filepath.Join(dir, queryFile))
+		b, err := os.ReadFile(Path(dir, queryFile))
 		if err != nil {
 			return fmt.Errorf("query_file: %w", err)
 		}
 		*query = string(b)
 	}
 	if pipelineFile != "" {
-		b, err := os.ReadFile(filepath.Join(dir, pipelineFile))
+		b, err := os.ReadFile(Path(dir, pipelineFile))
 		if err != nil {
 			return fmt.Errorf("pipeline_file: %w", err)
 		}
@@ -630,13 +642,13 @@ func (c *Config) checkQuery(ch Check, needID bool, add func(string, ...any)) {
 		for _, err := range checkPipeline(&ch.Pipeline) {
 			add("pipeline: %w", err)
 		}
-		switch since := hasValue(&ch.Pipeline, "$$since"); {
+		switch since := usesVar(&ch.Pipeline, "since"); {
 		case ch.Window > 0 && !since:
 			add("window: the pipeline must compare a time field with $$since, the start of the window, inside $expr")
 		case ch.Window == 0 && since:
 			add("pipeline: $$since is the start of the window; set window")
 		}
-		switch until := hasValue(&ch.Pipeline, "$$until"); {
+		switch until := usesVar(&ch.Pipeline, "until"); {
 		case ch.Settle > 0 && !until:
 			add("settle: the pipeline must compare a time field with $$until, the end of the rows that have settled, inside $expr")
 		case ch.Settle == 0 && until:
@@ -847,13 +859,45 @@ func checkPipeline(n *yaml.Node) []error {
 	return errs
 }
 
-// hasValue says whether a scalar in the tree is v.
-func hasValue(n *yaml.Node, v string) bool {
-	if n.Kind == yaml.ScalarNode {
-		return n.Value == v
+// usesVar says whether a pipeline uses the variable $$name of money-checks.
+// Inside a stage or an operator that binds a variable of that name, such as
+// let: {since: ...} of $lookup, $$since is that variable, not the parameter:
+// the pipeline of the $lookup, the in of $let, the in or cond of $map, $filter
+// and $reduce do not count. The values bound still do, they are outside.
+func usesVar(n *yaml.Node, name string) bool {
+	switch n.Kind {
+	case yaml.ScalarNode:
+		return n.Value == "$$"+name || strings.HasPrefix(n.Value, "$$"+name+".")
+	case yaml.MappingNode:
+		bound := false
+		for i := 0; i+1 < len(n.Content); i += 2 {
+			k, v := n.Content[i].Value, n.Content[i+1]
+			if (k == "let" || k == "vars") && v.Kind == yaml.MappingNode && hasKey(v, name) || k == "as" && v.Value == name {
+				bound = true
+			}
+		}
+		for i := 0; i+1 < len(n.Content); i += 2 {
+			k := n.Content[i].Value
+			if bound && (k == "pipeline" || k == "in" || k == "cond") {
+				continue
+			}
+			if usesVar(n.Content[i+1], name) {
+				return true
+			}
+		}
+		return false
 	}
 	for _, child := range n.Content {
-		if hasValue(child, v) {
+		if usesVar(child, name) {
+			return true
+		}
+	}
+	return false
+}
+
+func hasKey(n *yaml.Node, key string) bool {
+	for i := 0; i+1 < len(n.Content); i += 2 {
+		if n.Content[i].Value == key {
 			return true
 		}
 	}

@@ -627,3 +627,34 @@ checks:
 		t.Errorf("expect query %q", c.Checks[0].Expect.Query)
 	}
 }
+
+// $$since bound by let, vars or as is that variable, not the start of the window.
+func TestOwnSinceVariable(t *testing.T) {
+	ok := `
+version: 1
+sources: {billing: {mongodb: {uri_env: A, database: shop}}}
+checks:
+  - name: lookup_let
+    source: billing
+    collection: payments
+    pipeline:
+      - $lookup:
+          from: refunds
+          let: {since: "$paid_at"}
+          pipeline: [{$match: {$expr: {$gte: ["$created_at", "$$since"]}}}]
+          as: later
+  - name: map_as
+    source: billing
+    collection: payments
+    pipeline:
+      - $set: {d: {$map: {input: "$dates", as: since, in: {$year: "$$since"}}}}
+`
+	if _, err := Parse([]byte(ok), "."); err != nil {
+		t.Fatal(err)
+	}
+	// The value bound is outside the variable: $$since there is the parameter.
+	bad := strings.Replace(ok, `let: {since: "$paid_at"}`, `let: {since: "$$since"}`, 1)
+	if _, err := Parse([]byte(bad), "."); err == nil || !strings.Contains(err.Error(), "check lookup_let: pipeline: $$since is the start of the window; set window") {
+		t.Errorf("got %v", err)
+	}
+}
