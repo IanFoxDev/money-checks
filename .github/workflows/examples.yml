@@ -23,8 +23,10 @@ jobs:
           code=$?
           set -e
           cat out/report.md
-          # Violations are planted, so money-checks must exit with 1.
+          # Violations are planted, so money-checks must exit with 1. Compose
+          # exits with 1 too when a database does not start, so check the report.
           test "$code" -eq 1
+          grep -q '^| two_renewals_in_one_period | error | violations | 1 |' out/report.md
       - name: The checks find exactly the planted violations
         run: |
           MC_UID=$(id -u) MC_GID=$(id -g) docker compose run --rm money-checks \
@@ -83,5 +85,7 @@ jobs:
           serve third
           if grep -q '"msg":"state changed"' out/third.log; then exit 1; fi
           test "$(stat -c %a out/state.json)" = 600
+      - if: failure()
+        run: docker compose logs --no-color mongo postgres clickhouse | tail -n 200
       - if: always()
         run: docker compose down -v
