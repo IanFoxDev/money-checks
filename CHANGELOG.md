@@ -8,6 +8,8 @@ configuration, the report format or the metric names; such changes are marked
 
 ## [Unreleased]
 
+## [0.5.0] - 2026-10-21
+
 ### Changed
 
 - `serve` remembers the violations of each check by id and posts new ones also
@@ -30,6 +32,8 @@ configuration, the report format or the metric names; such changes are marked
 - `every` on a check: `serve` runs a heavy check every `every`, a multiple of
   `serve.interval`, instead of on every run; a full run still runs it.
   `money_check_interval_seconds{check}` says how often each check runs.
+- The example restarts `serve` with a state file around a planted double charge in
+  CI: the restart posts that one violation and nothing else.
 
 ### Fixed
 
@@ -176,7 +180,8 @@ CI, with the database tests required to run.
 - `show` and `mask` for the columns a report may contain.
 - Docker image and the example in `examples/subscriptions`.
 
-[Unreleased]: https://github.com/IanFoxDev/money-checks/compare/v0.4.1...HEAD
+[Unreleased]: https://github.com/IanFoxDev/money-checks/compare/v0.5.0...HEAD
+[0.5.0]: https://github.com/IanFoxDev/money-checks/compare/v0.4.1...v0.5.0
 [0.4.1]: https://github.com/IanFoxDev/money-checks/compare/v0.4.0...v0.4.1
 [0.4.0]: https://github.com/IanFoxDev/money-checks/compare/v0.3.0...v0.4.0
 [0.3.0]: https://github.com/IanFoxDev/money-checks/compare/v0.2.0...v0.3.0
