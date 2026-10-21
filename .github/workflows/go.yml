@@ -22,7 +22,8 @@ jobs:
           --health-timeout 5s
           --health-retries 15
       mongo:
-        image: mongo:8
+        # 8.3 does not start on Linux 6.19 (SERVER-121912).
+        image: mongo:8.2
         env:
           MONGO_INITDB_ROOT_USERNAME: root
           MONGO_INITDB_ROOT_PASSWORD: root

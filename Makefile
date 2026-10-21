@@ -31,7 +31,7 @@ postgres-down:
 	docker rm -f money-checks-pg
 
 mongo-up:
-	docker run -d --rm --name money-checks-mongo -e MONGO_INITDB_ROOT_USERNAME=root -e MONGO_INITDB_ROOT_PASSWORD=root -p 55435:27017 mongo:8
+	docker run -d --rm --name money-checks-mongo -e MONGO_INITDB_ROOT_USERNAME=root -e MONGO_INITDB_ROOT_PASSWORD=root -p 55435:27017 mongo:8.2
 	until docker exec money-checks-mongo mongosh -u root -p root --quiet --eval 'db.runCommand({ping: 1})' >/dev/null 2>&1; do sleep 1; done
 
 mongo-down:

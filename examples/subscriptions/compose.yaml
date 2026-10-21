@@ -6,7 +6,8 @@ name: money-checks-example
 
 services:
   mongo:
-    image: mongo:8
+    # 8.3 does not start on Linux 6.19 (SERVER-121912), which CI runners now have.
+    image: mongo:8.2
     environment:
       MONGO_INITDB_ROOT_USERNAME: root
       MONGO_INITDB_ROOT_PASSWORD: root
