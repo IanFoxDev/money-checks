@@ -8,6 +8,8 @@ configuration, the report format or the metric names; such changes are marked
 
 ## [Unreleased]
 
+## [0.6.1] - 2026-10-22
+
 ### Fixed
 
 - A check that failed on its own, a timeout or a query error, and then ran again
@@ -218,7 +220,8 @@ CI, with the database tests required to run.
 - `show` and `mask` for the columns a report may contain.
 - Docker image and the example in `examples/subscriptions`.
 
-[Unreleased]: https://github.com/IanFoxDev/money-checks/compare/v0.6.0...HEAD
+[Unreleased]: https://github.com/IanFoxDev/money-checks/compare/v0.6.1...HEAD
+[0.6.1]: https://github.com/IanFoxDev/money-checks/compare/v0.6.0...v0.6.1
 [0.6.0]: https://github.com/IanFoxDev/money-checks/compare/v0.5.0...v0.6.0
 [0.5.0]: https://github.com/IanFoxDev/money-checks/compare/v0.4.1...v0.5.0
 [0.4.1]: https://github.com/IanFoxDev/money-checks/compare/v0.4.0...v0.4.1
