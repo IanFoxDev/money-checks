@@ -25,6 +25,9 @@ configuration, the report format or the metric names; such changes are marked
 
 ### Added
 
+- `examples/kubernetes`: `serve` as one Deployment with the state file on a
+  volume, a Secret for the URIs, a ServiceMonitor and the alerts of the README as
+  a PrometheusRule. CI validates the manifests with kubeconform.
 - `serve.retry`, 1m by default: the checks of a source that was down run again
   after 1m, 2m, 4m and so on up to `interval`, instead of waiting for the next
   run. Only those checks run, and the schedule of the others does not move.

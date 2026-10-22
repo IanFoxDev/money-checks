@@ -315,7 +315,7 @@ enough.
   configuration is loaded. At start money-checks reads the user's privileges with
   `connectionStatus` and stops if the user can write to the database, or if there is
   no user at all (a server without authentication). `require_read_only: false`
-  accepts the risk and prints a warning on every run. Each pipeline is sent with
+  accepts the risk and prints a warning (`run` on every run, `serve` once). Each pipeline is sent with
   `maxTimeMS`, so the server stops the work when the check times out, and with the
   read preference from the URI, so checks can read from a secondary.
 - **ClickHouse**: every query is sent with `readonly=2`, which the query cannot turn
@@ -356,6 +356,10 @@ Slack messages carry no rows at all.
 a double-entry ledger in PostgreSQL and daily statistics in ClickHouse with thirteen
 money bugs planted, and nine checks that find them. `docker compose run --rm money-checks run -c ...` prints the report;
 CI checks it against the list of planted bugs.
+
+[examples/kubernetes](examples/kubernetes) runs `serve` in a cluster: a Deployment
+with the state file on a volume, a ServiceMonitor and the alerts below as a
+PrometheusRule.
 
 The full configuration: [docs/config.md](docs/config.md).
 
