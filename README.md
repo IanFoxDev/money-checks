@@ -101,6 +101,7 @@ against a staging copy.
 | `money_check_new_violations_total` | `check` | violations `serve` had not seen before, or saw with another amount |
 | `money_check_oldest_violation_age_seconds` | `check` | how long ago `serve` first saw the oldest violation the check still finds |
 | `money_check_interval_seconds` | `check` | how often `serve` runs the check: its `every`, or `serve.interval` |
+| `money_check_source_up` | `source` | 1 if the source answered in the last run that used it, 0 if it could not be reached |
 | `money_checks_runs_total` | | runs of all checks |
 
 When a run fails, `money_check_up` drops to 0 and the violation gauges keep the last
@@ -129,12 +130,18 @@ groups:
         expr: money_check_oldest_violation_age_seconds > 7 * 86400
         annotations:
           summary: "{{ $labels.check }}: a violation is open for more than a week"
+      - alert: MoneyCheckSourceDown
+        expr: money_check_source_up == 0
+        for: 15m
+        annotations:
+          summary: "money-checks cannot reach {{ $labels.source }}"
 ```
 
 With `serve.slack.webhook_env` set, a message goes to Slack when a check changes
 state (it starts finding violations, stops finding them, fails or recovers) and when
 it finds new violations while it already has some. Not on every run. All that
-changed in one run is one message, a line per check. Messages carry the check
+changed in one run is one message, a line per check. A database that cannot be
+reached is one line for all its checks, and one more when it is back. Messages carry the check
 name, the count and the totals, never rows. `serve.state_file` keeps what
 `serve` has seen across restarts, so a deploy does not post everything again.
 

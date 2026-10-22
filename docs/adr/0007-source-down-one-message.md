@@ -26,14 +26,16 @@ not read either.
 Opening a source already talks to the server: MongoDB runs `connectionStatus`,
 PostgreSQL pings, ClickHouse reads the `readonly` setting. A source that cannot be
 reached fails there, once per run, and every check of the source fails with the
-same error. What is missing is the part that tells people about it.
+same error. What is missing is the part that tells people about it, and the
+case of a connection that is lost after the source opened.
 
 ## Decision
 
-**A source is down when it cannot be opened, or when a query fails because the
-connection failed.** A connection failure is what the driver reports as one: a
-network error, a MongoDB server selection error, a refused or reset TCP
-connection. A timeout of the query itself, a syntax error or a failed `expect`
+**A source is down when it cannot be reached, at opening or during a query.** A
+connection failure is what the driver reports as one: a network error, a MongoDB
+server selection error, a refused or reset TCP connection. A source that opens
+the connection and then refuses to run, because a variable is empty or the user
+can write, is not down: that is the configuration, and its checks fail as before. A timeout of the query itself, a syntax error or a failed `expect`
 are failures of the check, as before: they say something about the check, and a
 person has to look at it.
 

@@ -418,6 +418,25 @@ refund_exceeds_payment failed: connection reset
 Above 20 lines the message ends with "and N more"; the log has every line, as
 `"msg":"state changed"`, and the message as `"msg":"message"`. Why: [adr/0007-source-down-one-message.md](adr/0007-source-down-one-message.md).
 
+A source that cannot be reached, because the connection is refused, reset or
+lost, or MongoDB finds no server to select, is down. Its checks do not run until
+the next run and get no lines of their own; the source gets one line when it goes
+down and one when it is back:
+
+```
+money-checks: source stats is down, 4 checks did not run: dial tcp 127.0.0.1:8123: connect: connection refused
+money-checks: source stats is up again
+```
+
+The error in the message is cut to 200 characters; the log has all of it. While a
+source is down its checks keep the violations they had: nothing is posted as
+fixed, and when the source is back only what is new is posted.
+`money_check_source_up{source}` is 0 meanwhile. A query that runs out of its
+`timeout`, an empty variable or a user that can write are not a source that is
+down: the check fails on its own, as before. `run` reports the checks of a source
+that is down as failed with "source stats is down: ...", and does not wait for each
+of them to time out.
+
 A violation is new when its id was not found by the last run, or was found with
 another amount, as the known file treats a changed amount: "found 2 new violations
 (59.98 USD), 151 in all". Known violations are not news. The message gives the

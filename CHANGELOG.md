@@ -14,6 +14,17 @@ configuration, the report format or the metric names; such changes are marked
   before, several under a first line such as "money-checks: 2 checks changed".
   Above 20 lines the message ends with "and N more". The first start with nine
   checks that are not clean was nine messages, now it is one. See ADR 0007.
+- A source that cannot be reached is one line, "source stats is down, 4 checks did
+  not run: ...", and "source stats is up again" when it is back, instead of a
+  message per check. Its checks keep their violations meanwhile, so the return of
+  the database does not post them again. After a query loses its connection, the
+  other checks of that source do not run in that run; their error is "source stats
+  is down: ...", in `run` too. Errors in Slack messages are cut to 200 characters.
+
+### Added
+
+- `money_check_source_up{source}` and the alert `MoneyCheckSourceDown` in the
+  README.
 
 ## [0.5.0] - 2026-10-21
 
