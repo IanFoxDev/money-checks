@@ -38,8 +38,13 @@ type Server struct {
 	lastFull time.Time
 	// down are the sources that could not be reached on the last run that used
 	// them.
-	down  map[string]bool
-	ready atomic.Bool
+	down map[string]bool
+	// pending are the checks that did not run because their source was down,
+	// with the scope they would have had; retry is the wait before the next
+	// try, doubled after each miss.
+	pending map[string]check.Scope
+	retry   time.Duration
+	ready   atomic.Bool
 }
 
 // maxTracked is the most violations serve remembers for one check. Above it the
@@ -80,7 +85,7 @@ func New(cfg config.Config, open check.Opener, notify Notifier, log *slog.Logger
 	reg := prometheus.NewRegistry()
 	return &Server{
 		cfg: cfg, open: open, now: now, log: log, notify: notify,
-		metrics: newMetrics(reg, cfg), reg: reg, states: map[string]*state{}, wait: map[string]int{}, down: map[string]bool{},
+		metrics: newMetrics(reg, cfg), reg: reg, states: map[string]*state{}, wait: map[string]int{}, down: map[string]bool{}, pending: map[string]check.Scope{},
 	}
 }
 
@@ -127,6 +132,38 @@ func (s *Server) Cycle(ctx context.Context) check.Report {
 		s.wait[ch.Name] = int(ch.Every/s.cfg.Serve.Interval) - 1
 		cfg.Checks = append(cfg.Checks, ch)
 	}
+	return s.run(ctx, cfg, scope)
+}
+
+// Retry runs again the checks that did not run because their source was down,
+// without moving the schedule of the other runs. A check that would have read
+// every row reads every row now. See docs/adr/0007-source-down-one-message.md.
+func (s *Server) Retry(ctx context.Context) check.Report {
+	cfg := s.cfg
+	cfg.Checks = nil
+	scope := check.Window
+	for _, ch := range s.cfg.Checks {
+		if sc, ok := s.pending[ch.Name]; ok {
+			cfg.Checks = append(cfg.Checks, ch)
+			if sc == check.Full {
+				scope = check.Full
+			}
+		}
+	}
+	return s.run(ctx, cfg, scope)
+}
+
+// RetryAfter is how soon to call Retry, or 0 when nothing waits for its source
+// or the next run comes as soon.
+func (s *Server) RetryAfter() time.Duration {
+	if len(s.pending) == 0 || s.retry >= s.cfg.Serve.Interval {
+		return 0
+	}
+	return s.retry
+}
+
+// run runs the checks of cfg in scope, updates the metrics and notifies.
+func (s *Server) run(ctx context.Context, cfg config.Config, scope check.Scope) check.Report {
 	found := map[string]*rows{}
 	r := check.RunExport(ctx, cfg, scope, s.open, s.now, func(name string, v check.Sample) error {
 		if v.Reason != "" {
@@ -152,12 +189,16 @@ func (s *Server) Cycle(ctx context.Context) check.Report {
 	var lines []string
 	for i, res := range r.Results {
 		if res.SourceDown != "" {
+			if s.pending[res.Name] != check.Full {
+				s.pending[res.Name] = res.Scope
+			}
 			// Its violations are what they were; the line of the source says why
 			// it did not run. See docs/adr/0007-source-down-one-message.md.
 			s.metrics.update(res, s.now())
 			s.log.Info("check finished", "check", res.Name, "scope", string(res.Scope), "status", res.Status, "duration", res.Duration.String(), "error", res.Error)
 			continue
 		}
+		delete(s.pending, res.Name)
 		s.metrics.update(res, s.now())
 		st := s.states[res.Name]
 		if st == nil {
@@ -206,6 +247,14 @@ func (s *Server) Cycle(ctx context.Context) check.Report {
 			s.log.Error("the state file cannot be written; a restart will post every check that is not clean", "file", s.cfg.Serve.StateFile, "error", err)
 		}
 	}
+	switch {
+	case len(s.pending) == 0:
+		s.retry = 0
+	case s.retry == 0:
+		s.retry = s.cfg.Serve.Retry
+	default:
+		s.retry = min(2*s.retry, s.cfg.Serve.Interval)
+	}
 	s.ready.Store(true)
 	return r
 }
@@ -240,8 +289,13 @@ func (s *Server) Run(ctx context.Context) error {
 
 	tick := time.NewTicker(s.cfg.Serve.Interval)
 	defer tick.Stop()
+	run := s.Cycle
 	for {
-		s.Cycle(ctx)
+		run(ctx)
+		var retry <-chan time.Time
+		if d := s.RetryAfter(); d > 0 {
+			retry = time.After(d)
+		}
 		select {
 		case <-ctx.Done():
 			shutdown, cancel := context.WithTimeout(context.WithoutCancel(ctx), 5*time.Second)
@@ -254,6 +308,9 @@ func (s *Server) Run(ctx context.Context) error {
 			}
 			return err
 		case <-tick.C:
+			run = s.Cycle
+		case <-retry:
+			run = s.Retry
 		}
 	}
 }

@@ -666,3 +666,73 @@ func TestMessageWithSources(t *testing.T) {
 		t.Errorf("cut: %q", c)
 	}
 }
+
+// The checks of a source that was down run again after serve.retry, then twice
+// as long, up to the interval; only those checks, and the next cycle comes when
+// it would have.
+func TestRetry(t *testing.T) {
+	conf := strings.Replace(conf, "version: 1\n", "version: 1\nserve: {interval: 10m, retry: 1m}\n", 1) + `
+  - name: daily_totals
+    source: stats
+    query: q
+    id: id
+`
+	conf = strings.Replace(conf, "sources: {billing: {postgres: {dsn_env: X}}}", "sources: {billing: {postgres: {dsn_env: X}}, stats: {postgres: {dsn_env: Y}}}", 1)
+	cfg, err := config.Parse([]byte(conf), ".")
+	if err != nil {
+		t.Fatal(err)
+	}
+	billing := &script{runs: [][]source.Row{{r("u1", 999, "USD")}, {r("u1", 999, "USD")}}}
+	stats := &script{runs: [][]source.Row{{}, {}}}
+	down := false
+	open := func(_ context.Context, name string, _ config.Source, _ func(string)) (source.Source, error) {
+		if name == "stats" {
+			return stats, nil
+		}
+		if down {
+			return nil, fmt.Errorf("source billing: %w", &net.OpError{Op: "dial", Net: "tcp", Err: syscall.ECONNREFUSED})
+		}
+		return billing, nil
+	}
+	n := &notes{}
+	s := New(cfg, open, n, slog.New(slog.NewTextHandler(io.Discard, nil)), func() time.Time { return time.Unix(1791400000, 0) })
+	ctx := context.Background()
+
+	s.Cycle(ctx)
+	if d := s.RetryAfter(); d != 0 {
+		t.Errorf("retry after %s with every source up", d)
+	}
+	down = true
+	s.Cycle(ctx)
+	for _, want := range []time.Duration{time.Minute, 2 * time.Minute, 4 * time.Minute, 8 * time.Minute, 0} {
+		if d := s.RetryAfter(); d != want {
+			t.Errorf("retry after %s, want %s", d, want)
+		}
+		if want == 0 {
+			break
+		}
+		s.Retry(ctx)
+	}
+	if stats.n != 2 {
+		t.Errorf("stats ran %d times, want 2: retries run only the checks that did not", stats.n)
+	}
+	down = false
+	r := s.Retry(ctx)
+	if len(r.Results) != 1 || r.Results[0].Name != "two_active_subscriptions" || r.Results[0].Scope != check.Full {
+		t.Errorf("retry ran %+v", r.Results)
+	}
+	if d := s.RetryAfter(); d != 0 {
+		t.Errorf("retry after %s once the source is back", d)
+	}
+	if !s.lastFull.Equal(time.Unix(1791400000, 0)) {
+		t.Errorf("a retry moved the full run: %s", s.lastFull)
+	}
+	want := []string{
+		"money-checks: two_active_subscriptions found 1 violation (9.99 USD) [error]",
+		"money-checks: source billing is down, 1 check did not run: dial tcp: connection refused",
+		"money-checks: source billing is up again",
+	}
+	if strings.Join(n.msgs, "\n") != strings.Join(want, "\n") {
+		t.Errorf("messages:\n%s\nwant:\n%s", strings.Join(n.msgs, "\n"), strings.Join(want, "\n"))
+	}
+}
