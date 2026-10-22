@@ -384,10 +384,29 @@ func (st *state) change(res check.Result, got *rows, now time.Time) (string, []s
 	complete := st.complete
 	st.seen, st.complete = next, complete || res.Scope == check.Full
 
-	// Before a full picture, after a failure, or when every violation is new,
-	// the state change says it all.
-	if !complete || wasFailed || len(added) == int(res.Violations) && fixed == 0 {
+	// Before a full picture, or when every violation is new, the state change
+	// says it all. After a failure the violations seen before are still known,
+	// so only what changed meanwhile is news. See
+	// docs/adr/0007-source-down-one-message.md.
+	if !complete || !wasFailed && len(added) == int(res.Violations) && fixed == 0 {
 		return stateChange(res, wasFailed, had, found), added
+	}
+	if wasFailed {
+		switch {
+		case !found:
+			return res.Name + " runs again and finds no violations", added
+		case len(added) == 0 && fixed == 0:
+			msg := res.Name + " runs again, no new " + noun(res, 2)
+			if res.Scope == check.Window {
+				return msg + " in the last " + check.Span(res.Window) + " [" + res.Severity + "]", nil
+			}
+			return msg + ", " + itoa(res.Violations) + " in all [" + res.Severity + "]", nil
+		}
+		line := news(res, added, addedSums, fixed, fixedSums)
+		if rest, ok := strings.CutPrefix(line, res.Name+":"); ok {
+			return res.Name + " runs again:" + rest, added
+		}
+		return res.Name + " runs again and" + strings.TrimPrefix(line, res.Name), added
 	}
 	if len(added) == 0 && fixed == 0 {
 		return "", nil
@@ -395,6 +414,12 @@ func (st *state) change(res check.Result, got *rows, now time.Time) (string, []s
 	if !found {
 		return res.Name + " no longer finds violations", nil
 	}
+	return news(res, added, addedSums, fixed, fixedSums), added
+}
+
+// news is the line about the violations a check found new and the ones it no
+// longer finds, with their totals.
+func news(res check.Result, added []string, addedSums []check.Money, fixed int, fixedSums []check.Money) string {
 	compare := res.RightSource != ""
 	msg := res.Name
 	if len(added) > 0 {
@@ -418,7 +443,7 @@ func (st *state) change(res check.Result, got *rows, now time.Time) (string, []s
 	default:
 		msg += ", " + itoa(res.Violations) + " left"
 	}
-	return msg + " [" + res.Severity + "]", added
+	return msg + " [" + res.Severity + "]"
 }
 
 // sourceNews are the lines about sources that went down or came back.

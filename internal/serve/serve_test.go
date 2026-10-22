@@ -761,3 +761,33 @@ func TestLogOnce(t *testing.T) {
 		t.Errorf("new violations logged %d times:\n%s", n, log.String())
 	}
 }
+
+// A check that fails on its own and runs again still knows its violations: it
+// says it runs again and what changed meanwhile, not the whole list.
+func TestRunsAgainPostsOnlyNews(t *testing.T) {
+	src := &script{runs: [][]source.Row{
+		{r("u1", 999, "USD"), r("u2", 500, "USD")},
+		nil, // a timeout
+		{r("u1", 999, "USD"), r("u2", 500, "USD")}, // back, the same
+		nil,
+		{r("u1", 999, "USD"), r("u2", 500, "USD"), r("u3", 100, "USD")}, // back, one more
+		nil,
+		{r("u1", 999, "USD")}, // back, one fixed
+	}}
+	s, n := newServer(t, src)
+	for range src.runs {
+		s.Cycle(context.Background())
+	}
+	want := []string{
+		"money-checks: two_active_subscriptions found 2 violations (14.99 USD) [error]",
+		"money-checks: two_active_subscriptions failed: connection reset",
+		"money-checks: two_active_subscriptions runs again, no new violations, 2 in all [error]",
+		"money-checks: two_active_subscriptions failed: connection reset",
+		"money-checks: two_active_subscriptions runs again and found 1 new violation (1.00 USD), 3 in all [error]",
+		"money-checks: two_active_subscriptions failed: connection reset",
+		"money-checks: two_active_subscriptions runs again: 2 violations fixed (6.00 USD), 1 left [error]",
+	}
+	if strings.Join(n.msgs, "\n") != strings.Join(want, "\n") {
+		t.Errorf("messages:\n%s\nwant:\n%s", strings.Join(n.msgs, "\n"), strings.Join(want, "\n"))
+	}
+}
