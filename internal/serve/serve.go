@@ -243,7 +243,7 @@ func (s *Server) run(ctx context.Context, cfg config.Config, scope check.Scope) 
 	news := s.sources(r.Results)
 	if len(news.lines)+len(lines) > 0 {
 		msg := message(news, lines)
-		s.log.Info("message", "lines", len(lines), "text", msg)
+		s.log.Info("message", "lines", len(news.lines)+len(lines), "text", msg)
 		if s.notify != nil {
 			if err := s.notify.Notify(ctx, msg); err != nil {
 				s.log.Error("notification failed", "error", err)
