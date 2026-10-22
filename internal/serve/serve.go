@@ -145,6 +145,7 @@ func (s *Server) Cycle(ctx context.Context) check.Report {
 		s.log.Warn(w)
 	}
 	s.metrics.runs.Inc()
+	var lines []string
 	for i, res := range r.Results {
 		s.metrics.update(res, s.now())
 		st := s.states[res.Name]
@@ -176,10 +177,15 @@ func (s *Server) Cycle(ctx context.Context) check.Report {
 		}
 		if msg != "" {
 			s.log.Info("state changed", "check", res.Name, "message", msg)
-			if s.notify != nil {
-				if err := s.notify.Notify(ctx, msg); err != nil {
-					s.log.Error("notification failed", "check", res.Name, "error", err)
-				}
+			lines = append(lines, msg)
+		}
+	}
+	if len(lines) > 0 {
+		msg := message(lines)
+		s.log.Info("message", "lines", len(lines), "text", msg)
+		if s.notify != nil {
+			if err := s.notify.Notify(ctx, msg); err != nil {
+				s.log.Error("notification failed", "error", err)
 			}
 		}
 	}
@@ -240,7 +246,7 @@ func (s *Server) Run(ctx context.Context) error {
 	}
 }
 
-// change records res and says what to post about it, or "", and which ids are
+// change records res and says the line to post about it, or "", and which ids are
 // new. The first run only reports problems; a check that is fine from the start
 // is not news. Then every new violation is news, an id not seen before or one
 // whose amount changed, also when the check already had violations. Only a full
@@ -251,7 +257,7 @@ func (st *state) change(res check.Result, got *rows, now time.Time) (string, []s
 			return "", nil
 		}
 		st.failed = true
-		return "money-checks: " + res.Name + " failed: " + res.Error, nil
+		return res.Name + " failed: " + res.Error, nil
 	}
 	wasFailed, had := st.failed, st.found[res.Scope]
 	found := res.Status == check.StatusViolations
@@ -310,10 +316,10 @@ func (st *state) change(res check.Result, got *rows, now time.Time) (string, []s
 		return "", nil
 	}
 	if !found {
-		return "money-checks: " + res.Name + " no longer finds violations", nil
+		return res.Name + " no longer finds violations", nil
 	}
 	compare := res.RightSource != ""
-	msg := "money-checks: " + res.Name
+	msg := res.Name
 	if len(added) > 0 {
 		msg += " found " + itoa(int64(len(added))) + " new " + noun(res, len(added)) + sums(addedSums, compare)
 	} else {
@@ -338,6 +344,26 @@ func (st *state) change(res check.Result, got *rows, now time.Time) (string, []s
 	return msg + " [" + res.Severity + "]", added
 }
 
+// maxLines is the most lines of one message; the log has all of them.
+const maxLines = 20
+
+// message is what a cycle posts: one line as it is, more under a first line
+// that counts them, so one event is one message. See
+// docs/adr/0007-source-down-one-message.md.
+func message(lines []string) string {
+	if len(lines) == 1 {
+		return "money-checks: " + lines[0]
+	}
+	msg := "money-checks: " + itoa(int64(len(lines))) + " checks changed"
+	for i, l := range lines {
+		if i == maxLines {
+			return msg + "\nand " + itoa(int64(len(lines)-maxLines)) + " more"
+		}
+		msg += "\n" + l
+	}
+	return msg
+}
+
 // stateChange is the message about a check that starts or stops finding
 // violations or runs again after failing, or "".
 func stateChange(res check.Result, wasFailed, had, found bool) string {
@@ -347,9 +373,9 @@ func stateChange(res check.Result, wasFailed, had, found bool) string {
 	case found:
 		return ""
 	case wasFailed:
-		return "money-checks: " + res.Name + " runs again and finds no violations"
+		return res.Name + " runs again and finds no violations"
 	case had && res.Scope == check.Full:
-		return "money-checks: " + res.Name + " no longer finds violations"
+		return res.Name + " no longer finds violations"
 	}
 	return ""
 }
@@ -408,7 +434,7 @@ func first(ids []string, n int) []string {
 }
 
 func describe(res check.Result) string {
-	msg := "money-checks: " + res.Name + " found " + itoa(res.Violations) + " " + noun(res, int(res.Violations))
+	msg := res.Name + " found " + itoa(res.Violations) + " " + noun(res, int(res.Violations))
 	if len(res.Totals) > 0 {
 		msg += " (" + list(res.Totals) + ")"
 	}

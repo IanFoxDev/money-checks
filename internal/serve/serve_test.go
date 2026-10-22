@@ -244,13 +244,67 @@ func TestDescribeCompare(t *testing.T) {
 		Name: "purchases_reach_stats", Source: "billing", RightSource: "stats", Severity: "error", Violations: 2, Scope: check.Window,
 		Window: 72 * time.Hour, Totals: []check.Money{{Currency: "USD", Minor: 3200, Exponent: 2}},
 	}
-	want := "money-checks: purchases_reach_stats found 2 keys where billing and stats differ (32.00 USD) in the last 72h [error]"
+	want := "purchases_reach_stats found 2 keys where billing and stats differ (32.00 USD) in the last 72h [error]"
 	if got := describe(res); got != want {
 		t.Errorf("%q", got)
 	}
 	res.Violations = 1
 	if got := describe(res); !strings.Contains(got, "found 1 key where billing and stats differ") {
 		t.Errorf("%q", got)
+	}
+}
+
+// All that changed in one cycle is one message, the checks in the order of the
+// configuration.
+func TestOneMessagePerCycle(t *testing.T) {
+	conf := conf + `
+  - name: refund_exceeds_payment
+    source: billing
+    query: q
+    id: id
+    amount: {field: amount, unit: minor, currency_field: currency}
+  - name: negative_wallet_balance
+    source: billing
+    query: q
+    id: id
+    amount: {field: amount, unit: minor, currency_field: currency}
+`
+	src := &script{runs: [][]source.Row{
+		{r("u1", 999, "USD")}, {}, {r("w1", 100, "EUR")}, // first cycle: two are not clean
+		{r("u1", 999, "USD")}, {}, {r("w1", 100, "EUR")}, // nothing changed: no message
+		{r("u1", 999, "USD"), r("u2", 500, "USD")}, nil, {}, // a new one, a failure, one fixed
+	}}
+	s, n := newServerWith(t, conf, src)
+	for range 3 {
+		s.Cycle(context.Background())
+	}
+	want := []string{
+		"money-checks: 2 checks changed\n" +
+			"two_active_subscriptions found 1 violation (9.99 USD) [error]\n" +
+			"negative_wallet_balance found 1 violation (1.00 EUR) [error]",
+		"money-checks: 3 checks changed\n" +
+			"two_active_subscriptions found 1 new violation (5.00 USD), 2 in all [error]\n" +
+			"refund_exceeds_payment failed: connection reset\n" +
+			"negative_wallet_balance no longer finds violations",
+	}
+	if strings.Join(n.msgs, "\n---\n") != strings.Join(want, "\n---\n") {
+		t.Errorf("messages:\n%s\nwant:\n%s", strings.Join(n.msgs, "\n---\n"), strings.Join(want, "\n---\n"))
+	}
+}
+
+// A message that needs scrolling is not read: above maxLines it ends with how
+// many more there are.
+func TestMessageLimit(t *testing.T) {
+	lines := make([]string, maxLines+2)
+	for i := range lines {
+		lines[i] = "c" + itoa(int64(i)) + " failed: x"
+	}
+	got := strings.Split(message(lines), "\n")
+	if len(got) != maxLines+2 || got[0] != "money-checks: 22 checks changed" || got[maxLines] != "c19 failed: x" || got[maxLines+1] != "and 2 more" {
+		t.Errorf("%q", got)
+	}
+	if got := message(lines[:1]); got != "money-checks: c0 failed: x" {
+		t.Errorf("one line: %q", got)
 	}
 }
 
@@ -438,12 +492,12 @@ func TestNewKeysOfCompare(t *testing.T) {
 	st.change(res, &rows{ids: map[string]*check.Money{"d1": d(-500), "d2": d(100)}}, now)
 	res.Violations = 2
 	msg, added := st.change(res, &rows{ids: map[string]*check.Money{"d1": d(-800), "d2": d(100)}}, now)
-	if want := "money-checks: daily found 1 new key where billing and stats differ (8.00 USD), 2 in all [error]"; msg != want || len(added) != 1 {
+	if want := "daily found 1 new key where billing and stats differ (8.00 USD), 2 in all [error]"; msg != want || len(added) != 1 {
 		t.Errorf("%q %v", msg, added)
 	}
 	res.Violations = 1
 	msg, _ = st.change(res, &rows{ids: map[string]*check.Money{"d1": d(-800)}}, now)
-	if want := "money-checks: daily: 1 key no longer differs (1.00 USD), 1 left [error]"; msg != want {
+	if want := "daily: 1 key no longer differs (1.00 USD), 1 left [error]"; msg != want {
 		t.Errorf("%q", msg)
 	}
 }
