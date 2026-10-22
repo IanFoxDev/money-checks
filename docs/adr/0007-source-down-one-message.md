@@ -60,7 +60,7 @@ is down for 15 minutes" takes the place of one alert per check.
 
 **One message per cycle.** Every change of a cycle goes into one message: a
 first line with the counts, then one line per check or source, with the same words
-as today.
+as today. A cycle with one change posts that line alone, as today.
 
 ```
 money-checks: 2 checks changed, 1 source down

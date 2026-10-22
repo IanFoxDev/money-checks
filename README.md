@@ -133,8 +133,9 @@ groups:
 
 With `serve.slack.webhook_env` set, a message goes to Slack when a check changes
 state (it starts finding violations, stops finding them, fails or recovers) and when
-it finds new violations while it already has some. Not on every run. Messages carry
-the check name, the count and the totals, never rows. `serve.state_file` keeps what
+it finds new violations while it already has some. Not on every run. All that
+changed in one run is one message, a line per check. Messages carry the check
+name, the count and the totals, never rows. `serve.state_file` keeps what
 `serve` has seen across restarts, so a deploy does not post everything again.
 
 ## Read the last day, not the whole table

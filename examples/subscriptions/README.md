@@ -55,11 +55,17 @@ Set `MC_PORT` if 8080 is taken on your machine.
 ## What serve posts
 
 `serve` without Slack writes what it would post to its log, as `"msg":"state changed"`.
-The first run posts every check that finds violations, eight lines such as:
+The first run posts every check that finds violations, one message with eight
+lines:
 
 ```
-money-checks: two_renewals_in_one_period found 1 violation (9.99 USD) [error]
+money-checks: 8 checks changed
+two_renewals_in_one_period found 1 violation (9.99 USD) [error]
+...
 ```
+
+The log has each line as `"msg":"state changed"` and the message as
+`"msg":"message"`.
 
 From then on a check is posted when it finds violations it has not seen, also when
 it already had some. With `serve.state_file` it remembers them across restarts. CI

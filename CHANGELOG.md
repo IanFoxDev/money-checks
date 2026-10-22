@@ -8,6 +8,13 @@ configuration, the report format or the metric names; such changes are marked
 
 ## [Unreleased]
 
+### Changed
+
+- `serve` posts one message per run instead of one per check: a single change as
+  before, several under a first line such as "money-checks: 2 checks changed".
+  Above 20 lines the message ends with "and N more". The first start with nine
+  checks that are not clean was nine messages, now it is one. See ADR 0007.
+
 ## [0.5.0] - 2026-10-21
 
 ### Changed

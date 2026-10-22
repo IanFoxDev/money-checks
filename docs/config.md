@@ -406,6 +406,18 @@ finding violations, stops finding them, fails or runs again after failing, and w
 it finds new violations while it already has some. The first run posts only about
 checks that are not clean.
 
+All that changed in one run is one message: a single change as one line, several
+under a first line that counts them, in the order of the configuration.
+
+```
+money-checks: 2 checks changed
+two_active_subscriptions found 1 new violation (5.00 EUR), 2 in all [error]
+refund_exceeds_payment failed: connection reset
+```
+
+Above 20 lines the message ends with "and N more"; the log has every line, as
+`"msg":"state changed"`, and the message as `"msg":"message"`. Why: [adr/0007-source-down-one-message.md](adr/0007-source-down-one-message.md).
+
 A violation is new when its id was not found by the last run, or was found with
 another amount, as the known file treats a changed amount: "found 2 new violations
 (59.98 USD), 151 in all". Known violations are not news. The message gives the
