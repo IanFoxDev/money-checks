@@ -23,6 +23,9 @@ configuration, the report format or the metric names; such changes are marked
 
 ### Added
 
+- `serve.retry`, 1m by default: the checks of a source that was down run again
+  after 1m, 2m, 4m and so on up to `interval`, instead of waiting for the next
+  run. Only those checks run, and the schedule of the others does not move.
 - `money_check_source_up{source}` and the alert `MoneyCheckSourceDown` in the
   README.
 

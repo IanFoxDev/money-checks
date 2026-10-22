@@ -394,6 +394,7 @@ works this way: [adr/0005-expect-and-test.md](adr/0005-expect-and-test.md).
 serve:
   interval: 10m            # default 10m, at least 1m
   full_every: 24h          # default 24h, at least interval: a full pass of checks with a window
+  retry: 1m                # default 1m (or interval, if shorter), from 10s to interval, below
   listen: ":8080"          # default :8080
   state_file: state.json  # optional: what serve has seen survives a restart, below
   slack:
@@ -431,6 +432,12 @@ money-checks: source stats is up again
 The error in the message is cut to 200 characters; the log has all of it. While a
 source is down its checks keep the violations they had: nothing is posted as
 fixed, and when the source is back only what is new is posted.
+
+`serve` does not wait a whole `interval` for such a source. It runs its checks
+again after `retry`, then after twice as long, 1m, 2m, 4m and so on, until the
+source answers or the wait reaches `interval`. A retry runs only those checks, in
+the scope they would have had, and does not move the other runs: with `interval:
+1h` a VPN that is back in two minutes costs two minutes of checks, not an hour.
 `money_check_source_up{source}` is 0 meanwhile. A query that runs out of its
 `timeout`, an empty variable or a user that can write are not a source that is
 down: the check fails on its own, as before. `run` reports the checks of a source
