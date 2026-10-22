@@ -439,7 +439,7 @@ fixed, and when the source is back only what is new is posted.
 again after `retry`, then after twice as long, 1m, 2m, 4m and so on, until the
 source answers or the wait reaches `interval`. A retry runs only those checks, in
 the scope they would have had, and does not move the other runs: with `interval:
-1h` a VPN that is back in two minutes costs two minutes of checks, not an hour.
+1h` a database that is back in two minutes costs two minutes of checks, not an hour.
 `money_check_source_up{source}` is 0 meanwhile. A query that runs out of its
 `timeout`, an empty variable or a user that can write are not a source that is
 down: the check fails on its own, as before. `run` reports the checks of a source

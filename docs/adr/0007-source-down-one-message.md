@@ -4,23 +4,23 @@ Date: 2026-10-22. Status: accepted.
 
 ## Context
 
-`serve` posts one message per check that changes. A day of `serve` on a laptop
-against several MongoDB databases and a ClickHouse, through a VPN and a tunnel,
-showed what that costs when the network is not perfect:
+`serve` posts one message per check that changes. That is right for a check that
+finds a new double charge, and wrong for everything that happens to the network
+between `serve` and the databases. Take ten checks that read one MongoDB and a
+`compare` check that also reads a ClickHouse:
 
-- The first start posted 9 messages in a row, one per check that was not clean.
-- The tunnel to ClickHouse went down: 4 messages, "payments_reach_stats failed:
-  right: source stats: clickhouse: dial tcp ...: connection refused", and the same
-  for the three other checks of that source.
-- An hour later the VPN went down: 9 more. Each one carried the error of the
-  MongoDB driver, which prints the whole topology it tried: a few hundred
-  characters of addresses and server states per message.
-- After that `serve` waited a full `interval` before trying again. A VPN that is
-  back in two minutes still leaves an hour without checks.
+- The first start posts one message per check that is not clean, in a row.
+- ClickHouse restarts: the `compare` check posts "payments_reach_stats failed:
+  right: source stats: clickhouse: dial tcp ...: connection refused".
+- MongoDB fails over, or a network path drops: ten more messages. Each one carries
+  the error of the MongoDB driver, which prints the whole topology it tried: a few
+  hundred characters of addresses and server states per message.
+- After that `serve` waits a full `interval` before trying again. A database that
+  is back in two minutes still stays unchecked until the next run.
 
-The checks were fine; the network was not. Thirteen messages said one thing: two
-sources could not be reached. A channel that gets thirteen messages for one event
-is muted by the end of the week, and then the message about a new double charge is
+The checks are fine; the network is not. Eleven messages say one thing: two
+sources cannot be reached. A channel that gets eleven messages for one event is
+muted by the end of the week, and then the message about a new double charge is
 not read either.
 
 Opening a source already talks to the server: MongoDB runs `connectionStatus`,
