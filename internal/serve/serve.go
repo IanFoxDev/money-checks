@@ -13,6 +13,7 @@ import (
 	"strings"
 	"sync/atomic"
 	"time"
+	"unicode/utf8"
 
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/client_golang/prometheus/promhttp"
@@ -35,7 +36,10 @@ type Server struct {
 	wait map[string]int
 	// lastFull is when the last full run started; zero before the first.
 	lastFull time.Time
-	ready    atomic.Bool
+	// down are the sources that could not be reached on the last run that used
+	// them.
+	down  map[string]bool
+	ready atomic.Bool
 }
 
 // maxTracked is the most violations serve remembers for one check. Above it the
@@ -76,7 +80,7 @@ func New(cfg config.Config, open check.Opener, notify Notifier, log *slog.Logger
 	reg := prometheus.NewRegistry()
 	return &Server{
 		cfg: cfg, open: open, now: now, log: log, notify: notify,
-		metrics: newMetrics(reg, cfg), reg: reg, states: map[string]*state{}, wait: map[string]int{},
+		metrics: newMetrics(reg, cfg), reg: reg, states: map[string]*state{}, wait: map[string]int{}, down: map[string]bool{},
 	}
 }
 
@@ -147,6 +151,13 @@ func (s *Server) Cycle(ctx context.Context) check.Report {
 	s.metrics.runs.Inc()
 	var lines []string
 	for i, res := range r.Results {
+		if res.SourceDown != "" {
+			// Its violations are what they were; the line of the source says why
+			// it did not run. See docs/adr/0007-source-down-one-message.md.
+			s.metrics.update(res, s.now())
+			s.log.Info("check finished", "check", res.Name, "scope", string(res.Scope), "status", res.Status, "duration", res.Duration.String(), "error", res.Error)
+			continue
+		}
 		s.metrics.update(res, s.now())
 		st := s.states[res.Name]
 		if st == nil {
@@ -180,8 +191,9 @@ func (s *Server) Cycle(ctx context.Context) check.Report {
 			lines = append(lines, msg)
 		}
 	}
-	if len(lines) > 0 {
-		msg := message(lines)
+	news := s.sources(r.Results)
+	if len(news.lines)+len(lines) > 0 {
+		msg := message(news, lines)
 		s.log.Info("message", "lines", len(lines), "text", msg)
 		if s.notify != nil {
 			if err := s.notify.Notify(ctx, msg); err != nil {
@@ -257,7 +269,7 @@ func (st *state) change(res check.Result, got *rows, now time.Time) (string, []s
 			return "", nil
 		}
 		st.failed = true
-		return res.Name + " failed: " + res.Error, nil
+		return res.Name + " failed: " + cut(res.Error), nil
 	}
 	wasFailed, had := st.failed, st.found[res.Scope]
 	found := res.Status == check.StatusViolations
@@ -344,17 +356,101 @@ func (st *state) change(res check.Result, got *rows, now time.Time) (string, []s
 	return msg + " [" + res.Severity + "]", added
 }
 
+// sourceNews are the lines about sources that went down or came back.
+type sourceNews struct {
+	lines    []string
+	down, up int
+}
+
+// sources says which sources went down or came back in this run, from its
+// results, and updates money_check_source_up. A source is up when a check that
+// uses it got past opening it.
+func (s *Server) sources(results []check.Result) sourceNews {
+	var order []string
+	failed, cause, up := map[string]int{}, map[string]string{}, map[string]bool{}
+	note := func(name string) {
+		if _, ok := failed[name]; !ok {
+			failed[name] = 0
+			order = append(order, name)
+		}
+	}
+	for _, res := range results {
+		if res.SourceDown != "" {
+			note(res.SourceDown)
+			failed[res.SourceDown]++
+			if cause[res.SourceDown] == "" {
+				cause[res.SourceDown] = strings.TrimPrefix(res.Error, "source "+res.SourceDown+" is down: ")
+			}
+			continue
+		}
+		for _, name := range []string{res.Source, res.RightSource} {
+			if name != "" {
+				note(name)
+				up[name] = true
+			}
+		}
+	}
+	var n sourceNews
+	for _, name := range order {
+		isUp := up[name] && failed[name] == 0
+		if isUp {
+			s.metrics.sourceUp.WithLabelValues(name).Set(1)
+		} else {
+			s.metrics.sourceUp.WithLabelValues(name).Set(0)
+		}
+		switch {
+		case !isUp && !s.down[name]:
+			n.down++
+			line := "source " + name + " is down, " + itoa(int64(failed[name])) + " " + plural(failed[name], "check", "checks") + " did not run: " + cut(cause[name])
+			n.lines = append(n.lines, line)
+			s.log.Warn("source down", "source", name, "checks", failed[name], "error", cause[name])
+		case isUp && s.down[name]:
+			n.up++
+			n.lines = append(n.lines, "source "+name+" is up again")
+			s.log.Info("source up again", "source", name)
+		}
+		s.down[name] = !isUp
+	}
+	return n
+}
+
+// maxError is the most of an error a message shows; the log has all of it. A
+// driver error can carry the whole topology it tried.
+const maxError = 200
+
+func cut(s string) string {
+	if len(s) <= maxError {
+		return s
+	}
+	i := maxError
+	for i > 0 && !utf8.RuneStart(s[i]) {
+		i--
+	}
+	return s[:i] + "..."
+}
+
 // maxLines is the most lines of one message; the log has all of them.
 const maxLines = 20
 
 // message is what a cycle posts: one line as it is, more under a first line
-// that counts them, so one event is one message. See
+// that counts them, sources first, so one event is one message. See
 // docs/adr/0007-source-down-one-message.md.
-func message(lines []string) string {
+func message(src sourceNews, checks []string) string {
+	lines := append(append([]string(nil), src.lines...), checks...)
 	if len(lines) == 1 {
 		return "money-checks: " + lines[0]
 	}
-	msg := "money-checks: " + itoa(int64(len(lines))) + " checks changed"
+	var counts []string
+	if len(checks) > 0 {
+		counts = append(counts, itoa(int64(len(checks)))+" "+plural(len(checks), "check", "checks")+" changed")
+	}
+	if src.down > 0 {
+		counts = append(counts, itoa(int64(src.down))+" "+plural(src.down, "source", "sources")+" down")
+	}
+	if src.up > 0 {
+		counts = append(counts, itoa(int64(src.up))+" "+plural(src.up, "source", "sources")+" up again")
+	}
+	msg := "money-checks: " + strings.Join(counts, ", ")
 	for i, l := range lines {
 		if i == maxLines {
 			return msg + "\nand " + itoa(int64(len(lines)-maxLines)) + " more"

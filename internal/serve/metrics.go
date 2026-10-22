@@ -23,6 +23,7 @@ type metrics struct {
 	added       *prometheus.CounterVec
 	oldest      *prometheus.GaugeVec
 	interval    *prometheus.GaugeVec
+	sourceUp    *prometheus.GaugeVec
 }
 
 func newMetrics(reg prometheus.Registerer, cfg config.Config) *metrics {
@@ -64,8 +65,11 @@ func newMetrics(reg prometheus.Registerer, cfg config.Config) *metrics {
 		interval: prometheus.NewGaugeVec(prometheus.GaugeOpts{
 			Name: "money_check_interval_seconds", Help: "How often serve runs the check: its every, or serve.interval.",
 		}, []string{"check"}),
+		sourceUp: prometheus.NewGaugeVec(prometheus.GaugeOpts{
+			Name: "money_check_source_up", Help: "1 if the source answered in the last run that used it, 0 if it could not be reached.",
+		}, []string{"source"}),
 	}
-	reg.MustRegister(m.runs, m.violations, m.known, m.amount, m.up, m.lastSuccess, m.duration, m.errors, m.expect, m.added, m.oldest, m.interval)
+	reg.MustRegister(m.runs, m.violations, m.known, m.amount, m.up, m.lastSuccess, m.duration, m.errors, m.expect, m.added, m.oldest, m.interval, m.sourceUp)
 	// For an alert on a check that stopped running, whatever its every.
 	for _, ch := range cfg.Checks {
 		every := ch.Every

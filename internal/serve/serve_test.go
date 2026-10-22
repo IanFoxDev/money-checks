@@ -7,9 +7,11 @@ import (
 	"fmt"
 	"io"
 	"log/slog"
+	"net"
 	"net/http"
 	"net/http/httptest"
 	"strings"
+	"syscall"
 	"testing"
 	"time"
 
@@ -299,11 +301,11 @@ func TestMessageLimit(t *testing.T) {
 	for i := range lines {
 		lines[i] = "c" + itoa(int64(i)) + " failed: x"
 	}
-	got := strings.Split(message(lines), "\n")
+	got := strings.Split(message(sourceNews{}, lines), "\n")
 	if len(got) != maxLines+2 || got[0] != "money-checks: 22 checks changed" || got[maxLines] != "c19 failed: x" || got[maxLines+1] != "and 2 more" {
 		t.Errorf("%q", got)
 	}
-	if got := message(lines[:1]); got != "money-checks: c0 failed: x" {
+	if got := message(sourceNews{}, lines[:1]); got != "money-checks: c0 failed: x" {
 		t.Errorf("one line: %q", got)
 	}
 }
@@ -596,4 +598,71 @@ serve: {interval: 1h, full_every: 6h}
 		`money_check_interval_seconds{check="heavy"} 10800`,
 		`money_check_interval_seconds{check="light"} 3600`,
 	)
+}
+
+// A source that cannot be reached is one line when it goes down and one when it
+// is back. Its checks keep their violations meanwhile: nothing is fixed while it
+// is away, and nothing is posted again when it returns.
+func TestSourceDownAndBack(t *testing.T) {
+	conf := conf + `
+  - name: refund_exceeds_payment
+    source: billing
+    query: q
+    id: id
+    amount: {field: amount, unit: minor, currency_field: currency}
+`
+	cfg, err := config.Parse([]byte(conf), ".")
+	if err != nil {
+		t.Fatal(err)
+	}
+	src := &script{runs: [][]source.Row{
+		{r("u1", 999, "USD")}, {}, // a violation
+		{r("u1", 999, "USD")}, {}, // back: the same
+		{r("u1", 999, "USD"), r("u2", 500, "USD")}, {}, // one new
+	}}
+	down := false
+	open := func(context.Context, string, config.Source, func(string)) (source.Source, error) {
+		if down {
+			return nil, fmt.Errorf("source billing: postgres: %w", &net.OpError{Op: "dial", Net: "tcp", Err: syscall.ECONNREFUSED})
+		}
+		return src, nil
+	}
+	n := &notes{}
+	s := New(cfg, open, n, slog.New(slog.NewTextHandler(io.Discard, nil)), func() time.Time { return time.Unix(1791400000, 0) })
+	ctx := context.Background()
+
+	s.Cycle(ctx)
+	down = true
+	s.Cycle(ctx)
+	has(t, scrape(t, s), `money_check_source_up{source="billing"} 0`, `money_check_up{check="two_active_subscriptions"} 0`)
+	s.Cycle(ctx) // still down: nothing
+	down = false
+	s.Cycle(ctx)
+	has(t, scrape(t, s), `money_check_source_up{source="billing"} 1`)
+	s.Cycle(ctx)
+	want := []string{
+		"money-checks: two_active_subscriptions found 1 violation (9.99 USD) [error]",
+		"money-checks: source billing is down, 2 checks did not run: postgres: dial tcp: connection refused",
+		"money-checks: source billing is up again",
+		"money-checks: two_active_subscriptions found 1 new violation (5.00 USD), 2 in all [error]",
+	}
+	if strings.Join(n.msgs, "\n") != strings.Join(want, "\n") {
+		t.Errorf("messages:\n%s\nwant:\n%s", strings.Join(n.msgs, "\n"), strings.Join(want, "\n"))
+	}
+}
+
+// Sources come first and are counted in the first line; a long error is cut.
+func TestMessageWithSources(t *testing.T) {
+	src := sourceNews{lines: []string{"source stats is down, 4 checks did not run: x"}, down: 1}
+	got := message(src, []string{"two_active_subscriptions found 1 new violation (5.00 EUR), 2 in all [error]"})
+	want := "money-checks: 1 check changed, 1 source down\n" +
+		"source stats is down, 4 checks did not run: x\n" +
+		"two_active_subscriptions found 1 new violation (5.00 EUR), 2 in all [error]"
+	if got != want {
+		t.Errorf("%q", got)
+	}
+	long := strings.Repeat("a", maxError-1) + "\u00e9" + "tail"
+	if c := cut(long); c != strings.Repeat("a", maxError-1)+"..." {
+		t.Errorf("cut: %q", c)
+	}
 }
