@@ -68,9 +68,11 @@ jobs:
             docker rm -f mc-state > /dev/null
             grep '"msg":"state changed"' "out/$1.log" || true
           }
-          # The first start posts every check that finds violations.
+          # The first start posts every check that finds violations, in one message.
           serve first
           test "$(grep -c '"msg":"state changed"' out/first.log)" -eq 8
+          test "$(grep -c '"msg":"message"' out/first.log)" -eq 1
+          grep -q '8 checks changed' out/first.log
           # While serve is down, sub_d is charged twice for 2026-09. created_at is
           # now, inside settle, so payments_reach_stats does not see it yet.
           docker compose exec -T mongo mongosh -u root -p root --quiet --eval '
