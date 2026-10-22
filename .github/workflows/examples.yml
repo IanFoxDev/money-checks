@@ -91,3 +91,16 @@ jobs:
         run: docker compose logs --no-color mongo postgres clickhouse | tail -n 200
       - if: always()
         run: docker compose down -v
+
+  kubernetes:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - name: The manifests are valid Kubernetes and Prometheus Operator objects
+        run: |
+          curl -sSfL https://github.com/yannh/kubeconform/releases/download/v0.7.0/kubeconform-linux-amd64.tar.gz | tar -xz kubeconform
+          kubectl kustomize examples/kubernetes > manifests.yaml
+          ./kubeconform -strict -summary \
+            -schema-location default \
+            -schema-location 'https://raw.githubusercontent.com/datreeio/CRDs-catalog/main/{{.Group}}/{{.ResourceKind}}_{{.ResourceAPIVersion}}.json' \
+            manifests.yaml
