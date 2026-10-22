@@ -36,7 +36,8 @@ func TestUnreachable(t *testing.T) {
 // What each driver returns when nothing listens on the port is unreachable, so
 // a database that is away is one line in Slack and not a failure per check.
 func TestOpenUnreachable(t *testing.T) {
-	ln, err := net.Listen("tcp", "127.0.0.1:0")
+	var lc net.ListenConfig
+	ln, err := lc.Listen(t.Context(), "tcp", "127.0.0.1:0")
 	if err != nil {
 		t.Fatal(err)
 	}
