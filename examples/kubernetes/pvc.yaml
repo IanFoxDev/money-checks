@@ -1,0 +1,11 @@
+# The state file: the violations serve has seen, so a deploy does not post them
+# again. Ids and amounts, a few hundred KB; keep it off the repository.
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: money-checks-state
+spec:
+  accessModes: [ReadWriteOnce]
+  resources:
+    requests:
+      storage: 1Gi

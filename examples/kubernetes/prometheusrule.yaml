@@ -1,0 +1,29 @@
+# The alerts of the README. Route severity=page to whoever owns the money.
+apiVersion: monitoring.coreos.com/v1
+kind: PrometheusRule
+metadata:
+  name: money-checks
+spec:
+  groups:
+    - name: money-checks
+      rules:
+        - alert: MoneyInvariantBroken
+          expr: money_check_violations{severity="error"} > 0
+          labels: {severity: page}
+          annotations:
+            summary: "{{ $labels.check }}: {{ $value }} violations"
+        - alert: MoneyCheckNotRunning
+          expr: |
+            time() - max by (check) (money_check_last_success_timestamp_seconds)
+              > 3 * max by (check) (money_check_interval_seconds)
+          annotations:
+            summary: "{{ $labels.check }} has missed three runs in a row"
+        - alert: MoneyViolationOpenForAWeek
+          expr: money_check_oldest_violation_age_seconds > 7 * 86400
+          annotations:
+            summary: "{{ $labels.check }}: a violation is open for more than a week"
+        - alert: MoneyCheckSourceDown
+          expr: money_check_source_up == 0
+          for: 15m
+          annotations:
+            summary: "money-checks cannot reach {{ $labels.source }}"

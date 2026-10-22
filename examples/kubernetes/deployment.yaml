@@ -1,0 +1,61 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: money-checks
+spec:
+  # One replica: two would post every message twice and fight over the state
+  # file. Recreate, so the old pod lets go of the volume before the new one starts.
+  replicas: 1
+  strategy:
+    type: Recreate
+  template:
+    spec:
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 65532
+        runAsGroup: 65532
+        fsGroup: 65532
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: money-checks
+          image: ghcr.io/ianfoxdev/money-checks
+          args: [serve, -c, /etc/money-checks/checks.yaml]
+          envFrom:
+            - secretRef:
+                name: money-checks
+          ports:
+            - name: http
+              containerPort: 8080
+          # /readyz answers once the first run has finished, which is a full pass
+          # and can take minutes; until then Prometheus does not scrape numbers that
+          # mean nothing.
+          readinessProbe:
+            httpGet: {path: /readyz, port: http}
+            periodSeconds: 10
+          livenessProbe:
+            httpGet: {path: /healthz, port: http}
+            periodSeconds: 30
+          resources:
+            # Memory grows with the violations serve remembers, at most 100000
+            # ids a check; raise the limit for checks with many.
+            requests: {cpu: 50m, memory: 64Mi}
+            limits: {memory: 256Mi}
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: [ALL]
+          volumeMounts:
+            - name: config
+              mountPath: /etc/money-checks
+              readOnly: true
+            - name: state
+              mountPath: /var/lib/money-checks
+      volumes:
+        - name: config
+          configMap:
+            name: money-checks
+        - name: state
+          persistentVolumeClaim:
+            claimName: money-checks-state

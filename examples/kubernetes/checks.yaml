@@ -1,0 +1,55 @@
+# Two checks of examples/subscriptions, set up for a cluster: the state file on
+# the volume, Slack from the Secret. Replace them with your own.
+version: 1
+defaults:
+  timeout: 30s
+sources:
+  shop:
+    mongodb:
+      uri_env: SHOP_MONGO_URI
+      database: shop
+  ledger:
+    postgres:
+      dsn_env: LEDGER_PG_DSN
+
+serve:
+  interval: 10m
+  full_every: 24h
+  retry: 1m
+  state_file: /var/lib/money-checks/state.json
+  slack:
+    webhook_env: SLACK_WEBHOOK_URL
+
+checks:
+  - name: two_renewals_in_one_period
+    description: A subscription was charged more than once for the same period.
+    source: shop
+    collection: payments
+    pipeline:
+      - $match: {kind: renewal, status: succeeded}
+      - $group:
+          _id: {subscription: "$subscription_id", period: "$period"}
+          n: {$sum: 1}
+          total: {$sum: "$amount"}
+          largest: {$max: "$amount"}
+          currency: {$first: "$currency"}
+      - $match: {n: {$gt: 1}}
+      - $set: {extra: {$round: [{$subtract: ["$total", "$largest"]}, 2]}}
+      - $sort: {_id: 1}
+    amount: {field: extra, unit: major, currency_field: currency}
+    show: [n]
+    expect:
+      pipeline: [{$match: {kind: renewal, status: succeeded}}, {$count: n}]
+
+  - name: unbalanced_transactions
+    description: A ledger transaction's entries do not sum to zero in a currency.
+    source: ledger
+    query: |
+      select transaction_id || ':' || currency as id, currency, sum(amount_minor) as imbalance
+      from ledger_entries
+      group by transaction_id, currency
+      having sum(amount_minor) <> 0
+      order by 1
+    id: id
+    amount: {field: imbalance, unit: minor, currency_field: currency}
+    expect: {query: select count(*) from ledger_entries}

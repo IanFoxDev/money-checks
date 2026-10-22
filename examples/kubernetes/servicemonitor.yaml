@@ -1,0 +1,13 @@
+# For the Prometheus Operator. Without it, scrape the Service on :8080/metrics.
+apiVersion: monitoring.coreos.com/v1
+kind: ServiceMonitor
+metadata:
+  name: money-checks
+spec:
+  # kustomize does not fill in the selector of a custom resource.
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: money-checks
+  endpoints:
+    - port: http
+      interval: 1m
