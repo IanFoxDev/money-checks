@@ -87,6 +87,32 @@ jobs:
           serve third
           if grep -q '"msg":"state changed"' out/third.log; then exit 1; fi
           test "$(stat -c %a out/state.json)" = 600
+      - name: A database that goes away is one line, and one when it is back
+        run: |
+          { cat checks.yaml; printf 'serve:\n  interval: 1m\n  retry: 10s\n  state_file: /out/down.json\n'; } > out/down.yaml
+          MC_UID=$(id -u) MC_GID=$(id -g) docker compose run -d --name mc-down money-checks \
+            serve -c /out/down.yaml > /dev/null
+          wait_for() {
+            for i in $(seq 1 150); do
+              docker logs mc-down 2>&1 | grep -q "$1" && return 0
+              sleep 1
+            done
+            docker logs mc-down
+            return 1
+          }
+          wait_for '"msg":"message"'
+          docker compose stop clickhouse
+          # The next run, a minute later, finds it down.
+          wait_for 'source stats is down, 1 check did not run'
+          docker compose start clickhouse
+          # A retry finds it back before the next run would.
+          wait_for 'source stats is up again'
+          docker logs mc-down > out/down.log 2>&1
+          docker rm -f mc-down > /dev/null
+          grep '"msg":"message"' out/down.log
+          # Three messages: the first run, down, up again; nothing posted twice.
+          test "$(grep -c '"msg":"message"' out/down.log)" -eq 3
+          grep -q '"text":"money-checks: source stats is up again"' out/down.log
       - if: failure()
         run: docker compose logs --no-color mongo postgres clickhouse | tail -n 200
       - if: always()

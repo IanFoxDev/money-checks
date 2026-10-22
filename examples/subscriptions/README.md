@@ -89,6 +89,17 @@ The file holds the ids and amounts of the violations, with mode 0600. Without it
 restart posts all eight lines again, which after a few deploys is how a channel gets
 muted.
 
+A database that goes away is one line. CI runs `serve` with `interval: 1m` and
+`retry: 10s`, stops ClickHouse after the first run and starts it again:
+
+```
+money-checks: source stats is down, 1 check did not run: clickhouse: dial tcp: lookup clickhouse on 127.0.0.11:53: no such host
+money-checks: source stats is up again
+```
+
+The second line comes from a retry ten seconds later, not from the next run. The
+violations `payments_reach_stats` had before are not posted again.
+
 To check that every check finds exactly the planted bugs:
 
 ```
