@@ -405,7 +405,9 @@ Each run opens the sources again, so a database that restarts between runs does 
 need money-checks to restart. With `slack`, a message is posted when a check starts
 finding violations, stops finding them, fails or runs again after failing, and when
 it finds new violations while it already has some. The first run posts only about
-checks that are not clean.
+checks that are not clean. A check that failed and runs again says so with what
+changed meanwhile ("runs again, no new violations, 158 in all", "runs again and
+found 1 new violation ..."), not with its whole list.
 
 All that changed in one run is one message: a single change as one line, several
 under a first line that counts them, in the order of the configuration.

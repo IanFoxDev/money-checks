@@ -8,6 +8,14 @@ configuration, the report format or the metric names; such changes are marked
 
 ## [Unreleased]
 
+### Fixed
+
+- A check that failed on its own, a timeout or a query error, and then ran again
+  posted every violation it finds, as if they were new: "found 158 violations".
+  It now posts what changed while it failed: "runs again, no new violations, 158
+  in all", or the new and fixed ones. A state file written by 0.5, where the
+  checks of a database that was away are failed, posts this once.
+
 ## [0.6.0] - 2026-10-22
 
 ### Changed
