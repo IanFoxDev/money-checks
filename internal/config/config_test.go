@@ -248,7 +248,7 @@ serve: {interval: 1h}
 	if err != nil {
 		t.Fatal(err)
 	}
-	if c.Checks[0].Window != 48*time.Hour || c.Serve.FullEvery != 24*time.Hour {
+	if c.Checks[0].Window != 48*time.Hour || c.Serve.FullEvery != 24*time.Hour || c.Serve.Retry != time.Minute {
 		t.Errorf("window %s, full_every %s", c.Checks[0].Window, c.Serve.FullEvery)
 	}
 
@@ -271,7 +271,7 @@ checks:
   - {name: odd_every, source: ledger, query: select 1, id: id, every: 90m}
   - {name: short_every, source: ledger, query: select 1, id: id, every: 30m}
   - {name: window_every, source: ledger, query: select $1, id: id, window: 2h, every: 6h}
-serve: {interval: 1h, full_every: 30m}
+serve: {interval: 1h, full_every: 30m, retry: 2h}
 `
 	_, err = Parse([]byte(bad), ".")
 	if err == nil {
@@ -291,6 +291,7 @@ serve: {interval: 1h, full_every: 30m}
 		"check short_every: every: a multiple of serve.interval (1h0m0s), got 30m0s",
 		"check window_every: window: at least every (6h0m0s), got 2h0m0s",
 		"serve.full_every: at least serve.interval (1h0m0s), got 30m0s",
+		"serve.retry: from 10s to serve.interval (1h0m0s), got 2h0m0s",
 	} {
 		if !strings.Contains(err.Error(), want) {
 			t.Errorf("missing %q in:\n%v", want, err)

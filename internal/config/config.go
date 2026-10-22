@@ -269,6 +269,9 @@ type Serve struct {
 	// so a restart does not post them again. A relative path is relative to the
 	// configuration file.
 	StateFile string `yaml:"state_file"`
+	// Retry is how soon serve runs again the checks of a source that was down,
+	// doubled after each miss up to Interval.
+	Retry time.Duration `yaml:"retry"`
 }
 
 // Slack posts when a check starts or stops finding violations, or fails.
@@ -282,6 +285,7 @@ const (
 	DefaultSamples   = 10
 	DefaultInterval  = 10 * time.Minute
 	DefaultFullEvery = 24 * time.Hour
+	DefaultRetry     = time.Minute
 	DefaultListen    = ":8080"
 	MaxSamples       = 1000
 	DefaultMaxRows   = 100000
@@ -472,6 +476,9 @@ func (c *Config) applyDefaults() {
 	if c.Serve.FullEvery == 0 {
 		c.Serve.FullEvery = DefaultFullEvery
 	}
+	if c.Serve.Retry == 0 {
+		c.Serve.Retry = min(DefaultRetry, c.Serve.Interval)
+	}
 	if c.Serve.Listen == "" {
 		c.Serve.Listen = DefaultListen
 	}
@@ -516,6 +523,9 @@ func (c *Config) check() []error {
 	}
 	if c.Serve.Interval < time.Minute {
 		errs = append(errs, fmt.Errorf("serve.interval: at least 1m, got %s", c.Serve.Interval))
+	}
+	if c.Serve.Retry < 10*time.Second || c.Serve.Retry > c.Serve.Interval {
+		errs = append(errs, fmt.Errorf("serve.retry: from 10s to serve.interval (%s), got %s", c.Serve.Interval, c.Serve.Retry))
 	}
 	if c.Serve.FullEvery < c.Serve.Interval {
 		errs = append(errs, fmt.Errorf("serve.full_every: at least serve.interval (%s), got %s", c.Serve.Interval, c.Serve.FullEvery))
