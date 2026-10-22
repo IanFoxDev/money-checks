@@ -8,6 +8,8 @@ configuration, the report format or the metric names; such changes are marked
 
 ## [Unreleased]
 
+## [0.6.0] - 2026-10-22
+
 ### Changed
 
 - `serve` posts one message per run instead of one per check: a single change as
@@ -33,6 +35,8 @@ configuration, the report format or the metric names; such changes are marked
   run. Only those checks run, and the schedule of the others does not move.
 - `money_check_source_up{source}` and the alert `MoneyCheckSourceDown` in the
   README.
+- The example stops ClickHouse under `serve` in CI: one line when it goes down,
+  one when a retry finds it back, and the old violations are not posted again.
 
 ## [0.5.0] - 2026-10-21
 
@@ -206,7 +210,8 @@ CI, with the database tests required to run.
 - `show` and `mask` for the columns a report may contain.
 - Docker image and the example in `examples/subscriptions`.
 
-[Unreleased]: https://github.com/IanFoxDev/money-checks/compare/v0.5.0...HEAD
+[Unreleased]: https://github.com/IanFoxDev/money-checks/compare/v0.6.0...HEAD
+[0.6.0]: https://github.com/IanFoxDev/money-checks/compare/v0.5.0...v0.6.0
 [0.5.0]: https://github.com/IanFoxDev/money-checks/compare/v0.4.1...v0.5.0
 [0.4.1]: https://github.com/IanFoxDev/money-checks/compare/v0.4.0...v0.4.1
 [0.4.0]: https://github.com/IanFoxDev/money-checks/compare/v0.3.0...v0.4.0

@@ -16,7 +16,7 @@ in a chargeback. The queries that find them usually get written once, by hand, d
 an incident, and nobody runs them again. money-checks keeps them in a file, runs them
 against a read-only user and turns each one into a number you can alert on.
 
-> Status: v0.5. Until 1.0 a minor version may change the configuration, the report
+> Status: v0.6. Until 1.0 a minor version may change the configuration, the report
 > or the metric names; such changes are marked **BREAKING** in the
 > [CHANGELOG](CHANGELOG.md).
 
@@ -50,7 +50,7 @@ checks:
 ```bash
 docker run --rm -v "$PWD:/etc/money-checks" \
   -e SHOP_MONGO_URI='mongodb://checks:secret@db/?authSource=shop&readPreference=secondary' \
-  ghcr.io/ianfoxdev/money-checks:0.5 run -c /etc/money-checks/checks.yaml
+  ghcr.io/ianfoxdev/money-checks:0.6 run -c /etc/money-checks/checks.yaml
 ```
 
 ```
