@@ -44,7 +44,9 @@ type Server struct {
 	// try, doubled after each miss.
 	pending map[string]check.Scope
 	retry   time.Duration
-	ready   atomic.Bool
+	// warned are the warnings of the sources already logged.
+	warned map[string]bool
+	ready  atomic.Bool
 }
 
 // maxTracked is the most violations serve remembers for one check. Above it the
@@ -85,7 +87,7 @@ func New(cfg config.Config, open check.Opener, notify Notifier, log *slog.Logger
 	reg := prometheus.NewRegistry()
 	return &Server{
 		cfg: cfg, open: open, now: now, log: log, notify: notify,
-		metrics: newMetrics(reg, cfg), reg: reg, states: map[string]*state{}, wait: map[string]int{}, down: map[string]bool{}, pending: map[string]check.Scope{},
+		metrics: newMetrics(reg, cfg), reg: reg, states: map[string]*state{}, wait: map[string]int{}, down: map[string]bool{}, pending: map[string]check.Scope{}, warned: map[string]bool{},
 	}
 }
 
@@ -182,8 +184,13 @@ func (s *Server) run(ctx context.Context, cfg config.Config, scope check.Scope) 
 		}
 		return nil
 	})
+	// A source opens on every run and warns the same way each time: once is
+	// enough for the log.
 	for _, w := range r.Warnings {
-		s.log.Warn(w)
+		if !s.warned[w] {
+			s.warned[w] = true
+			s.log.Warn(w)
+		}
 	}
 	s.metrics.runs.Inc()
 	var lines []string
@@ -224,7 +231,8 @@ func (s *Server) run(ctx context.Context, cfg config.Config, scope check.Scope) 
 			}
 			s.metrics.track(res.Name, st, n, s.now())
 		}
-		if len(added) > 0 {
+		// The first full picture lists no ids: they are every violation, not news.
+		if len(added) > 0 && tracked {
 			s.log.Info("new violations", "check", res.Name, "count", len(added), "ids", first(added, *cfg.Checks[i].Samples))
 		}
 		if msg != "" {

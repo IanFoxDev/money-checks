@@ -20,6 +20,8 @@ configuration, the report format or the metric names; such changes are marked
   the database does not post them again. After a query loses its connection, the
   other checks of that source do not run in that run; their error is "source stats
   is down: ...", in `run` too. Errors in Slack messages are cut to 200 characters.
+- `serve` logs a warning of a source once, not on every run, and the first full
+  run no longer logs every id as a new violation.
 
 ### Added
 

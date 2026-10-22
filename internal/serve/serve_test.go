@@ -736,3 +736,28 @@ func TestRetry(t *testing.T) {
 		t.Errorf("messages:\n%s\nwant:\n%s", strings.Join(n.msgs, "\n"), strings.Join(want, "\n"))
 	}
 }
+
+// The log says once what a source warns about on every run, and the first full
+// picture does not list its ids as new.
+func TestLogOnce(t *testing.T) {
+	cfg, err := config.Parse([]byte(conf), ".")
+	if err != nil {
+		t.Fatal(err)
+	}
+	src := &script{runs: [][]source.Row{{r("u1", 999, "USD")}, {r("u1", 999, "USD")}, {r("u1", 999, "USD"), r("u2", 1, "USD")}}}
+	open := func(_ context.Context, _ string, _ config.Source, warn func(string)) (source.Source, error) {
+		warn("source billing: connected without a user")
+		return src, nil
+	}
+	var log strings.Builder
+	s := New(cfg, open, nil, slog.New(slog.NewTextHandler(&log, nil)), func() time.Time { return time.Unix(1791400000, 0) })
+	for range 3 {
+		s.Cycle(context.Background())
+	}
+	if n := strings.Count(log.String(), "connected without a user"); n != 1 {
+		t.Errorf("the warning is logged %d times", n)
+	}
+	if n := strings.Count(log.String(), `msg="new violations"`); n != 1 || !strings.Contains(log.String(), "ids=[u2]") {
+		t.Errorf("new violations logged %d times:\n%s", n, log.String())
+	}
+}
