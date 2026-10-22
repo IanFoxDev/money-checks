@@ -6,7 +6,9 @@ import (
 	"fmt"
 	"math"
 	"math/big"
+	"net"
 	"strings"
+	"syscall"
 	"testing"
 	"time"
 
@@ -110,7 +112,7 @@ func runScope(t *testing.T, c config.Config, scope Scope, f *fake) Report {
 			t.Errorf("source %s opened %d times", name, opens[name])
 		}
 		if name == "broken" {
-			return nil, errors.New("source broken: connection refused")
+			return nil, fmt.Errorf("source broken: %w", &net.OpError{Op: "dial", Net: "tcp", Err: syscall.ECONNREFUSED})
 		}
 		warn("source " + name + ": a warning")
 		return f, nil
@@ -364,5 +366,32 @@ func TestSpan(t *testing.T) {
 		if got := Span(d); got != want {
 			t.Errorf("Span(%s) = %q, want %q", d, got, want)
 		}
+	}
+}
+
+// A query that fails because the connection did makes its source down: the
+// other checks of the source do not wait for the same failure. A check that
+// fails on its own leaves the source up.
+func TestSourceDown(t *testing.T) {
+	refused := &net.OpError{Op: "dial", Net: "tcp", Err: syscall.ECONNREFUSED}
+	f := &fake{errs: map[string]error{"rebills": refused}}
+	r := runFake(t, load(t, conf), f)
+	for i, want := range []string{"billing", "billing", "billing", "broken"} {
+		res := r.Results[i]
+		if res.Status != StatusFailed || res.SourceDown != want || !strings.HasPrefix(res.Error, "source "+want+" is down: ") {
+			t.Errorf("%s: %s %q %q", res.Name, res.Status, res.SourceDown, res.Error)
+		}
+	}
+	if _, ran := f.since["clean"]; ran {
+		t.Error("a check of a source that is down ran")
+	}
+
+	f = &fake{errs: map[string]error{"rebills": errors.New("syntax error at or near q")}}
+	r = runFake(t, load(t, conf), f)
+	if res := r.Results[0]; res.SourceDown != "" || res.Error != "syntax error at or near q" {
+		t.Errorf("rebills: %q %q", res.SourceDown, res.Error)
+	}
+	if res := r.Results[1]; res.Status != StatusOK {
+		t.Errorf("clean: %s %q", res.Status, res.Error)
 	}
 }

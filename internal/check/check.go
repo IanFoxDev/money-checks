@@ -55,7 +55,10 @@ type Result struct {
 	Totals      []Money // of Violations, one per currency, sorted by code
 	Samples     []Sample
 	Error       string
-	Duration    time.Duration
+	// SourceDown is the source that could not be reached, when that is why the
+	// check failed; Error then says so.
+	SourceDown string
+	Duration   time.Duration
 
 	// Scope is Window when the check read only the rows since Since, the
 	// start of its Window.
@@ -133,7 +136,8 @@ type Opener func(ctx context.Context, name string, s config.Source, warn func(st
 // Run runs every check in the order of the configuration, one at a time, so a
 // production database gets one query at a time. Each source is opened once, when
 // the first check that uses it runs. A source that cannot be opened fails its
-// checks; the other checks still run.
+// checks. One that cannot be reached, at opening or during a query, is down: its
+// remaining checks fail without running. The other checks still run.
 func Run(ctx context.Context, cfg config.Config, scope Scope, open Opener, now func() time.Time) Report {
 	return RunExport(ctx, cfg, scope, open, now, nil)
 }
@@ -157,13 +161,33 @@ func RunExport(ctx context.Context, cfg config.Config, scope Scope, open Opener,
 			}
 		}
 	}()
+	down := map[string]error{}
 	get := func(name string) (source.Source, error) {
 		o, ok := sources[name]
 		if !ok {
 			o.src, o.err = open(ctx, name, cfg.Sources[name], warn)
 			sources[name] = o
+			if source.Unreachable(o.err) {
+				down[name] = o.err
+			}
 		}
-		return o.src, o.err
+		if o.err != nil {
+			return nil, o.err
+		}
+		return watched{Source: o.src, name: name, down: down}, nil
+	}
+	// isDown is the first source of ch that is down, or "".
+	isDown := func(ch config.Check) string {
+		names := []string{ch.Source}
+		if ch.Compare != nil {
+			names = []string{ch.Compare.Left.Source, ch.Compare.Right.Source}
+		}
+		for _, n := range names {
+			if _, ok := down[n]; ok {
+				return n
+			}
+		}
+		return ""
 	}
 	for _, ch := range cfg.Checks {
 		start := now()
@@ -178,6 +202,15 @@ func RunExport(ctx context.Context, cfg config.Config, scope Scope, open Opener,
 		}
 		c := &collector{cur: cfg.Money, ch: ch, known: cfg.Known[ch.Name], at: r.StartedAt, res: &res, export: export}
 		var err error
+		if name := isDown(ch); name != "" {
+			res.Status, res.Error, res.SourceDown = StatusFailed, downError(name, down[name]), name
+			if ch.Compare != nil {
+				res.Source, res.RightSource = ch.Compare.Left.Source, ch.Compare.Right.Source
+			}
+			res.Duration = now().Sub(start)
+			r.Results = append(r.Results, res)
+			continue
+		}
 		if ch.Compare != nil {
 			res.Source, res.RightSource = ch.Compare.Left.Source, ch.Compare.Right.Source
 			err = runCompare(ctx, ch, func(name string) string { return cfg.Sources[name].Kind() }, get, c)
@@ -191,6 +224,9 @@ func RunExport(ctx context.Context, cfg config.Config, scope Scope, open Opener,
 		}
 		if err != nil {
 			res.Status, res.Error = StatusFailed, err.Error()
+			if name := isDown(ch); name != "" {
+				res.Error, res.SourceDown = downError(name, down[name]), name
+			}
 		} else {
 			c.finish()
 		}
@@ -198,6 +234,27 @@ func RunExport(ctx context.Context, cfg config.Config, scope Scope, open Opener,
 		r.Results = append(r.Results, res)
 	}
 	return r
+}
+
+// watched notes in down that its source is down when a query fails because the
+// connection did.
+type watched struct {
+	source.Source
+	name string
+	down map[string]error
+}
+
+func (w watched) Query(ctx context.Context, ch config.Check, since, until time.Time, each func(source.Row) error) error {
+	err := w.Source.Query(ctx, ch, since, until, each)
+	if _, ok := w.down[w.name]; !ok && source.Unreachable(err) {
+		w.down[w.name] = err
+	}
+	return err
+}
+
+// downError is the error of a check whose source is down.
+func downError(name string, err error) string {
+	return "source " + name + " is down: " + strings.TrimPrefix(err.Error(), "source "+name+": ")
 }
 
 // WithoutExpectWarning is the warning about the checks that have no expect query.

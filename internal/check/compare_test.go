@@ -148,7 +148,7 @@ func TestCompareFails(t *testing.T) {
 		}, "left: more than max_rows (3) rows"},
 		{"broken source", nil, func(y string) string {
 			return strings.Replace(y, "{source: stats, query: q}", "{source: broken, query: q}", 1)
-		}, "right: source broken: connection refused"},
+		}, "source broken is down: dial tcp: connection refused"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			rows := map[string][]source.Row{}
