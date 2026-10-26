@@ -1,0 +1,6 @@
+# What each recipe must find in analytics.sql, by id and amount.
+version: 1
+tests:
+  - check: duplicate_rows
+    violations:
+      - {id: 'p3:payment', amount: 15.00 EUR}

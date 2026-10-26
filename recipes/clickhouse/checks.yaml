@@ -1,0 +1,24 @@
+# Money invariants for ClickHouse. Each query lives in its own file: copy the
+# file and the check, change the table and column names to yours.
+# daily_totals_match, which compares ClickHouse with the app's database, is in
+# postgres/checks.yaml and mongodb/checks.yaml.
+# CI runs money-checks test with tests.yaml against analytics.sql.
+version: 1
+defaults:
+  timeout: 30s
+sources:
+  analytics:
+    clickhouse:
+      url_env: ANALYTICS_CLICKHOUSE_URL
+      database: analytics
+
+checks:
+  - name: duplicate_rows
+    description: A payment event is in the analytics table more than once.
+    source: analytics
+    window: 24h
+    query_file: duplicate_rows.sql
+    id: id
+    amount: {field: extra, unit: major, currency_field: currency}
+    show: [copies]
+    expect: {query: select count() from payments}

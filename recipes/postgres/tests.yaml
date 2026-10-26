@@ -34,3 +34,9 @@ tests:
     violations:
       - {id: s2, amount: 9.99 USD}
       - {id: s6, amount: 1200 JPY}
+  - check: daily_totals_match
+    violations:
+      # The difference, analytics minus the app.
+      - {id: 2026-10-02/EUR, amount: 15.00 EUR}
+      - {id: 2026-10-02/JPY, amount: 500 JPY}
+      - {id: 2026-10-02/USD, amount: -25.00 USD}

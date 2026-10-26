@@ -1,0 +1,12 @@
+# The app side of daily_totals_match: successful payments per day and
+# currency. $$since is the start of the window, $$until the end that settle
+# gives both sides, so a payment still on its way to analytics is not a
+# difference. The day is formatted as text, as ClickHouse returns it.
+- $match:
+    status: succeeded
+    $expr: {$and: [{$gte: ["$created_at", "$$since"]}, {$lt: ["$created_at", "$$until"]}]}
+- $group:
+    _id: {day: {$dateToString: {format: "%Y-%m-%d", date: "$created_at"}}, currency: "$currency"}
+    amount: {$sum: "$amount"}
+    payments: {$sum: 1}
+- $project: {_id: 0, day: "$_id.day", currency: "$_id.currency", amount: 1, payments: 1}
