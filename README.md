@@ -350,6 +350,16 @@ is dropped before anything is written. `--csv` and `--jsonl` write every row of
 one check, with the same columns and masking, and only when asked for by name.
 Slack messages carry no rows at all.
 
+## Recipes
+
+[recipes](recipes) has checks for the invariants most payment, wallet and
+subscription systems share, ready to copy: a negative balance, a ledger
+transaction that does not sum to zero, one provider transaction recorded as two
+payments, refunds over the payment, a payment stuck in pending, an order paid and
+never fulfilled, daily totals that differ between the app and ClickHouse, and
+more. Each comes for PostgreSQL and MongoDB, or ClickHouse, with rows that break it,
+rows next to them that must not, and a test in CI.
+
 ## Example
 
 [examples/subscriptions](examples/subscriptions) is a subscription shop in MongoDB,
@@ -371,8 +381,8 @@ first, open an issue.
 ## Contributing
 
 A check that caught a real bug in your system is the most useful contribution, with
-the data made up: open an issue with the "Check recipe" template. See
-[CONTRIBUTING.md](CONTRIBUTING.md).
+the data made up: a pull request to [recipes](recipes), or an issue with the "Check
+recipe" template. See [CONTRIBUTING.md](CONTRIBUTING.md).
 
 ## License
 

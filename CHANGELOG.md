@@ -8,6 +8,17 @@ configuration, the report format or the metric names; such changes are marked
 
 ## [Unreleased]
 
+### Added
+
+- `recipes/`: eleven checks to copy for PostgreSQL, MongoDB and ClickHouse, a
+  negative balance, an unbalanced ledger transaction, a balance that is not the
+  sum of its entries, a provider transaction recorded twice, refunds over the
+  payment, a payment in another currency than its order, a payment stuck in
+  pending, an order paid and not fulfilled, a subscription active after its
+  period, daily totals that differ between the app and ClickHouse, and duplicate
+  rows in ClickHouse. Each is tested in CI against data with the bug planted and
+  rows at the edge that must not fire.
+
 ## [0.6.1] - 2026-10-22
 
 ### Fixed
