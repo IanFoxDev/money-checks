@@ -10,3 +10,7 @@ tests:
       - {id: 't11:USD', amount: -0.50 USD}
       - {id: 't12:EUR', amount: -10.00 EUR}
       - {id: 't12:USD', amount: 11.00 USD}
+  - check: balance_matches_entries
+    violations:
+      - {id: acc_hugo, amount: 10.00 USD}
+      - {id: acc_judy, amount: 15.00 EUR}

@@ -1,0 +1,12 @@
+# Accounts whose stored balance is not the sum of their entries: the balance
+# updated twice when a request was retried, or changed by hand in a support tool
+# without an entry. An account and its entries written without a multi-document
+# transaction can differ for a moment; a difference that stays is the bug.
+# It reads every account, so the check runs every few hours, not every interval.
+# Needs an index on entries.account_id.
+- $lookup: {from: entries, localField: _id, foreignField: account_id, as: e}
+- $set: {entries_sum: {$sum: "$e.amount"}}
+- $set: {difference: {$subtract: ["$balance", "$entries_sum"]}}
+- $match: {difference: {$ne: 0}}
+- $project: {e: 0}
+- $sort: {_id: 1}

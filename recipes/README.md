@@ -21,6 +21,7 @@ shows what it catches and what it must leave alone.
 |---|---|---|---|
 | `negative_balance` | An account goes below zero when two debits read the same old balance, or a timed out job is retried | [query](postgres/negative_balance.sql) | [pipeline](mongodb/negative_balance.yaml) |
 | `unbalanced_transaction` | A ledger transaction does not sum to zero in a currency: a fee booked with different amounts on each side, or a conversion that lost a leg when the process died between two inserts | [query](postgres/unbalanced_transaction.sql) | [pipeline](mongodb/unbalanced_transaction.yaml) |
+| `balance_matches_entries` | A stored balance is not the sum of its entries: updated twice on a retried request, or changed by hand without an entry | [query](postgres/balance_matches_entries.sql) | [pipeline](mongodb/balance_matches_entries.yaml) |
 
 ## Test them
 
