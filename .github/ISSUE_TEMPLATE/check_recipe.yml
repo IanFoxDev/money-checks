@@ -1,5 +1,5 @@
 name: Check recipe
-description: A check that caught a real money bug, to add to the examples
+description: A check that caught a real money bug, to add to the recipes
 labels: ["recipe"]
 body:
   - type: textarea

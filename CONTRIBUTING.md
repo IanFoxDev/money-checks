@@ -34,6 +34,21 @@ cd examples/subscriptions && docker compose build && docker compose run --rm mon
 | `internal/report` | Markdown and JSON |
 | `internal/serve` | The schedule, metrics, readiness and Slack |
 | `examples/subscriptions` | The example shop; `tests.yaml` is what the checks must find, for `money-checks test` |
+| `recipes` | Checks to copy, one folder per database, with the data they are tested on |
+
+## Adding a recipe
+
+1. Put the query in `recipes/<database>/<recipe>.sql` (or `.yaml` for a MongoDB
+   pipeline), with a comment that says how the bug happens in real systems.
+2. Add the check to `checks.yaml` in that folder, with an `expect`.
+3. Add rows that break it and, next to them, rows at the edge that must not: zero,
+   the end of a window, a partial refund. Rows a recipe judges by age are dated
+   from now (see `recipes/README.md`).
+4. Add what it must find to `tests.yaml`, a row to the catalog in
+   `recipes/README.md`, and run the tests there with Docker.
+
+A recipe reads tables the other recipes read where it can, so the data stays one
+small, consistent system.
 
 ## Adding a source
 
