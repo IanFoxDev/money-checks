@@ -1,0 +1,7 @@
+[
+  {"_id": "s1", "owner": "anna", "status": "active", "price": {"$numberDecimal": "9.99"}, "currency": "USD", "current_period_end": "now+480h"},
+  {"_id": "s2", "owner": "ben", "status": "active", "price": {"$numberDecimal": "9.99"}, "currency": "USD", "current_period_end": "now-240h"},
+  {"_id": "s3", "owner": "carl", "status": "active", "price": {"$numberDecimal": "14.00"}, "currency": "EUR", "current_period_end": "now-24h"},
+  {"_id": "s4", "owner": "dana", "status": "expired", "price": {"$numberDecimal": "9.99"}, "currency": "USD", "current_period_end": "now-720h"},
+  {"_id": "s6", "owner": "eve", "status": "active", "price": {"$numberDecimal": "1200"}, "currency": "JPY", "current_period_end": "now-960h"}
+]

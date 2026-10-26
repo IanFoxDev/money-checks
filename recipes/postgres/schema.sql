@@ -32,7 +32,9 @@ create table orders (
     owner      text           not null,
     amount     numeric(20, 2) not null,
     currency   char(3)        not null,
-    created_at timestamptz    not null
+    created_at timestamptz    not null,
+    -- When the customer got what they paid for; null until then.
+    fulfilled_at timestamptz
 );
 create table payments (
     id              text           primary key,
@@ -46,6 +48,8 @@ create table payments (
 );
 create index on payments (provider, provider_txn_id);
 create index on payments (created_at);
+-- Pending payments are few; the index keeps finding them cheap.
+create index on payments (created_at) where status = 'pending';
 create table refunds (
     id         text           primary key,
     payment_id text           not null references payments,
@@ -54,3 +58,14 @@ create table refunds (
 );
 create index on refunds (payment_id);
 create index on refunds (created_at);
+
+-- Subscriptions: access is paid for until current_period_end.
+create table subscriptions (
+    id                 text           primary key,
+    owner              text           not null,
+    status             text           not null,  -- active, cancelled, expired
+    price              numeric(20, 2) not null,
+    currency           char(3)        not null,
+    current_period_end timestamptz    not null
+);
+create index on subscriptions (current_period_end) where status = 'active';

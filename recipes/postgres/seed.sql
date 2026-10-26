@@ -76,14 +76,14 @@ insert into entries (txn_id, account_id, amount, created_at) values
     ('t15', 'acc_hugo',         40.00, '2026-10-01T15:30:00Z');
 
 -- Orders, payments and refunds.
-insert into orders (id, owner, amount, currency, created_at) values
-    ('o1', 'anna',     20.00, 'USD', '2026-10-02T09:00:00Z'),
-    ('o2', 'ben',      15.00, 'EUR', '2026-10-02T09:00:00Z'),
-    ('o3', 'carl',      3000, 'JPY', '2026-10-02T09:00:00Z'),
-    ('o4', 'dana',     50.00, 'USD', '2026-10-02T09:00:00Z'),
-    ('o5', 'eve',      10.00, 'USD', '2026-10-02T09:00:00Z'),
-    ('o6', 'frank',    40.00, 'EUR', '2026-10-02T09:00:00Z'),
-    ('o7', 'gina',     25.00, 'USD', '2026-10-02T09:00:00Z');
+insert into orders (id, owner, amount, currency, created_at, fulfilled_at) values
+    ('o1', 'anna',     20.00, 'USD', '2026-10-02T09:00:00Z', '2026-10-02T09:01:00Z'),
+    ('o2', 'ben',      15.00, 'EUR', '2026-10-02T09:00:00Z', '2026-10-02T09:01:00Z'),
+    ('o3', 'carl',      3000, 'JPY', '2026-10-02T09:00:00Z', '2026-10-02T09:01:00Z'),
+    ('o4', 'dana',     50.00, 'USD', '2026-10-02T09:00:00Z', '2026-10-02T09:01:00Z'),
+    ('o5', 'eve',      10.00, 'USD', '2026-10-02T09:00:00Z', '2026-10-02T09:01:00Z'),
+    ('o6', 'frank',    40.00, 'EUR', '2026-10-02T09:00:00Z', '2026-10-02T09:01:00Z'),
+    ('o7', 'gina',     25.00, 'USD', '2026-10-02T09:00:00Z', '2026-10-02T09:01:00Z');
 
 insert into payments (id, order_id, provider, provider_txn_id, status, amount, currency, created_at) values
     -- duplicate_provider_txn: one acmepay payment, its webhook handled twice
@@ -111,3 +111,37 @@ insert into refunds (id, payment_id, amount, created_at) values
     -- refund_exceeds_payment: a manual refund on top of the automatic one, 5.00 over
     ('r6', 'p9',  10.00, '2026-10-02T11:20:00Z'),
     ('r7', 'p9',  20.00, '2026-10-02T11:30:00Z');
+
+-- The lifecycle recipes look at age, so these rows are dated from now.
+insert into orders (id, owner, amount, currency, created_at, fulfilled_at) values
+    ('o8',  'anna',  30.00, 'USD', now() - interval '3 hours',   null),
+    ('o9',  'ben',    8.00, 'EUR', now() - interval '5 minutes', null),
+    ('o10', 'carl',   5.00, 'USD', now() - interval '3 hours',   null),
+    ('o11', 'dana',  12.00, 'EUR', now() - interval '2 hours',   null),
+    ('o12', 'eve',    7.00, 'USD', now() - interval '5 minutes', null),
+    ('o13', 'frank', 20.00, 'USD', now() - interval '2 hours',   null);
+
+insert into payments (id, order_id, provider, provider_txn_id, status, amount, currency, created_at) values
+    -- stuck_in_pending: no answer from the provider for 3 hours
+    ('p10', 'o8',  'acmepay', 'A-1006', 'pending',   30.00, 'USD', now() - interval '3 hours'),
+    -- pending for 5 minutes is normal, and a failed payment is not pending
+    ('p11', 'o9',  'zenpay',  'Z-79',   'pending',    8.00, 'EUR', now() - interval '5 minutes'),
+    ('p12', 'o10', 'acmepay', 'A-1007', 'failed',     5.00, 'USD', now() - interval '3 hours'),
+    -- paid_not_granted: paid 2 hours ago, the order is still not fulfilled
+    ('p13', 'o11', 'zenpay',  'Z-80',   'succeeded', 12.00, 'EUR', now() - interval '2 hours'),
+    -- paid 5 minutes ago, fulfilment is still on its way
+    ('p14', 'o12', 'acmepay', 'A-1008', 'succeeded',  7.00, 'USD', now() - interval '5 minutes'),
+    -- paid, then refunded in full: nothing to fulfil
+    ('p15', 'o13', 'zenpay',  'Z-81',   'succeeded', 20.00, 'USD', now() - interval '2 hours');
+
+insert into refunds (id, payment_id, amount, created_at) values
+    ('r8', 'p15', 20.00, now() - interval '1 hour');
+
+-- access_after_expiry: s2 and s6 are active long after their period ended. s3
+-- ended a day ago and is in its grace period; s4 ended and is expired.
+insert into subscriptions (id, owner, status, price, currency, current_period_end) values
+    ('s1', 'anna',  'active',   9.99, 'USD', now() + interval '20 days'),
+    ('s2', 'ben',   'active',   9.99, 'USD', now() - interval '10 days'),
+    ('s3', 'carl',  'active',  14.00, 'EUR', now() - interval '1 day'),
+    ('s4', 'dana',  'expired',  9.99, 'USD', now() - interval '30 days'),
+    ('s6', 'eve',   'active',   1200, 'JPY', now() - interval '40 days');
