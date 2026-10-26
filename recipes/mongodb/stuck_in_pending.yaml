@@ -1,0 +1,11 @@
+# Payments still pending an hour after they started: the provider's webhook was
+# lost, the worker that polls the provider died, or the status update failed
+# after the provider answered. The customer may have paid; nobody knows yet.
+# Set the hour to a little more than your provider's longest normal wait.
+# No window: a payment stuck for a week is the one that matters most, and a
+# window would have let it go. Needs an index on {status: 1, created_at: 1}.
+- $match:
+    status: pending
+    $expr: {$lt: ["$created_at", {$dateSubtract: {startDate: "$$NOW", unit: hour, amount: 1}}]}
+- $project: {refunds: 0}
+- $sort: {created_at: 1}

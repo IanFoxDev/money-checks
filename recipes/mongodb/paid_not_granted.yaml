@@ -1,0 +1,15 @@
+# Orders paid more than 30 minutes ago and still not fulfilled: the event that
+# grants access was lost between payments and fulfilment, or fulfilment failed
+# and nothing retried it. The customer paid and got nothing; a support ticket
+# or a chargeback comes next. A payment refunded in full has nothing to fulfil.
+- $match: {fulfilled_at: null}
+- $lookup: {from: payments, localField: _id, foreignField: order_id, as: p}
+- $unwind: "$p"
+- $match:
+    p.status: succeeded
+    $expr:
+      $and:
+        - {$lt: ["$p.created_at", {$dateSubtract: {startDate: "$$NOW", unit: minute, amount: 30}}]}
+        - {$gt: ["$p.amount", {$sum: "$p.refunds.amount"}]}
+- $project: {_id: 1, currency: "$p.currency", amount: "$p.amount", payment_id: "$p._id", paid_at: "$p.created_at"}
+- $sort: {_id: 1}

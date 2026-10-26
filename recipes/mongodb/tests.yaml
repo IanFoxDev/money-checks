@@ -24,3 +24,13 @@ tests:
   - check: currency_mismatch
     violations:
       - {id: p7, amount: 10.00 EUR}
+  - check: stuck_in_pending
+    violations:
+      - {id: p10, amount: 30.00 USD}
+  - check: paid_not_granted
+    violations:
+      - {id: o11, amount: 12.00 EUR}
+  - check: access_after_expiry
+    violations:
+      - {id: s2, amount: 9.99 USD}
+      - {id: s6, amount: 1200 JPY}

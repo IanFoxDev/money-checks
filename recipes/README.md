@@ -25,6 +25,9 @@ shows what it catches and what it must leave alone.
 | `duplicate_provider_txn` | One provider transaction recorded as two payments: a webhook handled twice, or a redirect racing the webhook | [query](postgres/duplicate_provider_txn.sql) | [pipeline](mongodb/duplicate_provider_txn.yaml) |
 | `refund_exceeds_payment` | Refunds add up to more than the payment: a refund retried after a timeout, or a manual refund on top of the automatic one | [query](postgres/refund_exceeds_payment.sql) | [pipeline](mongodb/refund_exceeds_payment.yaml) |
 | `currency_mismatch` | A payment in another currency than its order, which every check comparing amounts only lets through | [query](postgres/currency_mismatch.sql) | [pipeline](mongodb/currency_mismatch.yaml) |
+| `stuck_in_pending` | A payment pending for hours: a lost webhook, a dead polling worker, a status update that failed after the provider answered | [query](postgres/stuck_in_pending.sql) | [pipeline](mongodb/stuck_in_pending.yaml) |
+| `paid_not_granted` | An order paid and not fulfilled: the event that grants access was lost, or fulfilment failed and nothing retried it | [query](postgres/paid_not_granted.sql) | [pipeline](mongodb/paid_not_granted.yaml) |
+| `access_after_expiry` | A subscription active long after its paid period: the renewal failed and the job that expires subscriptions skipped it | [query](postgres/access_after_expiry.sql) | [pipeline](mongodb/access_after_expiry.yaml) |
 
 ## Test them
 
@@ -37,6 +40,10 @@ docker compose build
 docker compose run --rm money-checks test -c /recipes/postgres/checks.yaml -t /recipes/postgres/tests.yaml
 docker compose run --rm money-checks test -c /recipes/mongodb/checks.yaml -t /recipes/mongodb/tests.yaml
 ```
+
+The rows the lifecycle recipes read are dated from now: `now() - interval '3 hours'`
+in `seed.sql`, `"now-3h"` in `mongodb/seed/`, which `mongodb/init.js` turns into a
+date. The MongoDB pipelines use `$dateSubtract`, MongoDB 5.0 and later.
 
 CI runs the same on every push.
 

@@ -68,3 +68,30 @@ checks:
     amount: {field: amount, unit: major, currency_field: currency}
     show: [order_id, order_amount, order_currency]
     expect: {query: "select count(*) from payments where status = 'succeeded'"}
+
+  - name: stuck_in_pending
+    description: A payment is still pending an hour after it started.
+    source: app
+    query_file: stuck_in_pending.sql
+    id: id
+    amount: {field: amount, unit: major, currency_field: currency}
+    show: [provider, provider_txn_id, created_at]
+    expect: {query: select count(*) from payments}
+
+  - name: paid_not_granted
+    description: An order was paid more than 30 minutes ago and is not fulfilled.
+    source: app
+    query_file: paid_not_granted.sql
+    id: id
+    amount: {field: amount, unit: major, currency_field: currency}
+    show: [payment_id, paid_at]
+    expect: {query: "select count(*) from payments where status = 'succeeded'"}
+
+  - name: access_after_expiry
+    description: A subscription is active days after its paid period ended.
+    source: app
+    query_file: access_after_expiry.sql
+    id: id
+    amount: {field: price, unit: major, currency_field: currency}
+    show: [owner, current_period_end]
+    expect: {query: select count(*) from subscriptions}
