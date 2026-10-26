@@ -143,3 +143,5 @@ jobs:
         run: docker compose run --rm money-checks test -c /recipes/postgres/checks.yaml -t /recipes/postgres/tests.yaml
       - name: MongoDB recipes find exactly the planted violations
         run: docker compose run --rm money-checks test -c /recipes/mongodb/checks.yaml -t /recipes/mongodb/tests.yaml
+      - name: ClickHouse recipes find exactly the planted violations
+        run: docker compose run --rm money-checks test -c /recipes/clickhouse/checks.yaml -t /recipes/clickhouse/tests.yaml
