@@ -1,0 +1,7 @@
+[
+  {"_id": "acc_anna", "owner": "anna", "currency": "USD", "balance": {"$numberDecimal": "25.00"}},
+  {"_id": "acc_ben", "owner": "ben", "currency": "EUR", "balance": {"$numberDecimal": "-3.50"}},
+  {"_id": "acc_carl", "owner": "carl", "currency": "USD", "balance": {"$numberDecimal": "0"}},
+  {"_id": "acc_dana", "owner": "dana", "currency": "JPY", "balance": {"$numberDecimal": "-500"}},
+  {"_id": "acc_house", "owner": "house", "currency": "USD", "balance": {"$numberDecimal": "-120.00"}, "allow_negative": true}
+]

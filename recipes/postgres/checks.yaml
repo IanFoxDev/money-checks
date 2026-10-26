@@ -1,0 +1,20 @@
+# Money invariants for PostgreSQL. Each query lives in its own file: copy the
+# file and the check, change the table and column names to yours.
+# CI runs money-checks test with tests.yaml against schema.sql and seed.sql.
+version: 1
+defaults:
+  timeout: 30s
+sources:
+  app:
+    postgres:
+      dsn_env: APP_PG_DSN
+
+checks:
+  - name: negative_balance
+    description: An account that may not go below zero is below zero.
+    source: app
+    query_file: negative_balance.sql
+    id: id
+    amount: {field: balance, unit: major, currency_field: currency}
+    show: [owner]
+    expect: {query: select count(*) from accounts}

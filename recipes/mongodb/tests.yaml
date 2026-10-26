@@ -1,0 +1,7 @@
+# What each recipe must find in seed/, by id and amount.
+version: 1
+tests:
+  - check: negative_balance
+    violations:
+      - {id: acc_ben, amount: -3.50 EUR}
+      - {id: acc_dana, amount: -500 JPY}

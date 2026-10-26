@@ -1,0 +1,5 @@
+# Accounts below zero that may not be. Usually two debits that both read the
+# old balance: a withdrawal racing a purchase, or a job retried after a timeout.
+# allow_negative is missing on most documents, so match "not true", not "false".
+- $match: {balance: {$lt: 0}, allow_negative: {$ne: true}}
+- $sort: {_id: 1}

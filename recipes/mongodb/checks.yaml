@@ -1,0 +1,23 @@
+# Money invariants for MongoDB. Each pipeline lives in its own file: copy the
+# file and the check, change the collection and field names to yours.
+# Amounts are Decimal128 in major units; doubles and integers in minor units
+# work too, see docs/config.md. CI runs money-checks test with tests.yaml
+# against the documents in seed/.
+version: 1
+defaults:
+  timeout: 30s
+sources:
+  app:
+    mongodb:
+      uri_env: APP_MONGO_URI
+      database: app
+
+checks:
+  - name: negative_balance
+    description: An account that may not go below zero is below zero.
+    source: app
+    collection: accounts
+    pipeline_file: negative_balance.yaml
+    amount: {field: balance, unit: major, currency_field: currency}
+    show: [owner]
+    expect: {pipeline: [{$count: n}]}
