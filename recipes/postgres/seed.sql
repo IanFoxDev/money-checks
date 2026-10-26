@@ -74,3 +74,40 @@ insert into entries (txn_id, account_id, amount, created_at) values
     -- hugo tops up 40.00, the stored balance says 50.00 (balance_matches_entries)
     ('t15', 'cash_usd',        -40.00, '2026-10-01T15:30:00Z'),
     ('t15', 'acc_hugo',         40.00, '2026-10-01T15:30:00Z');
+
+-- Orders, payments and refunds.
+insert into orders (id, owner, amount, currency, created_at) values
+    ('o1', 'anna',     20.00, 'USD', '2026-10-02T09:00:00Z'),
+    ('o2', 'ben',      15.00, 'EUR', '2026-10-02T09:00:00Z'),
+    ('o3', 'carl',      3000, 'JPY', '2026-10-02T09:00:00Z'),
+    ('o4', 'dana',     50.00, 'USD', '2026-10-02T09:00:00Z'),
+    ('o5', 'eve',      10.00, 'USD', '2026-10-02T09:00:00Z'),
+    ('o6', 'frank',    40.00, 'EUR', '2026-10-02T09:00:00Z'),
+    ('o7', 'gina',     25.00, 'USD', '2026-10-02T09:00:00Z');
+
+insert into payments (id, order_id, provider, provider_txn_id, status, amount, currency, created_at) values
+    -- duplicate_provider_txn: one acmepay payment, its webhook handled twice
+    ('p1', 'o1', 'acmepay', 'A-1001', 'succeeded',  20.00, 'USD', '2026-10-02T09:00:00Z'),
+    ('p2', 'o1', 'acmepay', 'A-1001', 'succeeded',  20.00, 'USD', '2026-10-02T09:01:00Z'),
+    -- the same provider id at another provider is another payment
+    ('p3', 'o2', 'acmepay', 'A-1002', 'succeeded',  15.00, 'EUR', '2026-10-02T09:10:00Z'),
+    ('p4', 'o3', 'zenpay',  'A-1002', 'succeeded',   3000, 'JPY', '2026-10-02T09:20:00Z'),
+    ('p5', 'o4', 'zenpay',  'Z-77',   'succeeded',  50.00, 'USD', '2026-10-02T09:30:00Z'),
+    -- currency_mismatch: the order is in USD; the failed attempt does not count, p7 does
+    ('p6', 'o5', 'acmepay', 'A-1003', 'failed',     10.00, 'EUR', '2026-10-02T09:40:00Z'),
+    ('p7', 'o5', 'acmepay', 'A-1004', 'succeeded',  10.00, 'EUR', '2026-10-02T09:41:00Z'),
+    ('p8', 'o6', 'zenpay',  'Z-78',   'succeeded',  40.00, 'EUR', '2026-10-02T09:50:00Z'),
+    ('p9', 'o7', 'acmepay', 'A-1005', 'succeeded',  25.00, 'USD', '2026-10-02T10:00:00Z');
+
+insert into refunds (id, payment_id, amount, created_at) values
+    -- a full refund
+    ('r1', 'p3',  15.00, '2026-10-02T10:40:00Z'),
+    -- two partial refunds that add up to the payment
+    ('r2', 'p5',  20.00, '2026-10-02T10:50:00Z'),
+    ('r3', 'p5',  30.00, '2026-10-02T11:00:00Z'),
+    -- refund_exceeds_payment: retried after a timeout, the first one went through
+    ('r4', 'p8',  40.00, '2026-10-02T11:10:00Z'),
+    ('r5', 'p8',  40.00, '2026-10-02T11:11:00Z'),
+    -- refund_exceeds_payment: a manual refund on top of the automatic one, 5.00 over
+    ('r6', 'p9',  10.00, '2026-10-02T11:20:00Z'),
+    ('r7', 'p9',  20.00, '2026-10-02T11:30:00Z');

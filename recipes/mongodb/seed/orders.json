@@ -1,0 +1,9 @@
+[
+  {"_id": "o1", "owner": "anna", "amount": {"$numberDecimal": "20.00"}, "currency": "USD", "created_at": {"$date": "2026-10-02T09:00:00Z"}},
+  {"_id": "o2", "owner": "ben", "amount": {"$numberDecimal": "15.00"}, "currency": "EUR", "created_at": {"$date": "2026-10-02T09:00:00Z"}},
+  {"_id": "o3", "owner": "carl", "amount": {"$numberDecimal": "3000"}, "currency": "JPY", "created_at": {"$date": "2026-10-02T09:00:00Z"}},
+  {"_id": "o4", "owner": "dana", "amount": {"$numberDecimal": "50.00"}, "currency": "USD", "created_at": {"$date": "2026-10-02T09:00:00Z"}},
+  {"_id": "o5", "owner": "eve", "amount": {"$numberDecimal": "10.00"}, "currency": "USD", "created_at": {"$date": "2026-10-02T09:00:00Z"}},
+  {"_id": "o6", "owner": "frank", "amount": {"$numberDecimal": "40.00"}, "currency": "EUR", "created_at": {"$date": "2026-10-02T09:00:00Z"}},
+  {"_id": "o7", "owner": "gina", "amount": {"$numberDecimal": "25.00"}, "currency": "USD", "created_at": {"$date": "2026-10-02T09:00:00Z"}}
+]

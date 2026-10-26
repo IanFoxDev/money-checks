@@ -24,3 +24,33 @@ create table entries (
 create index on entries (txn_id);
 create index on entries (account_id);
 create index on entries (created_at);
+
+-- Orders, the payments a provider (PSP) made for them, and refunds of payments.
+-- provider_txn_id is the provider's id of the payment, unique per provider only.
+create table orders (
+    id         text           primary key,
+    owner      text           not null,
+    amount     numeric(20, 2) not null,
+    currency   char(3)        not null,
+    created_at timestamptz    not null
+);
+create table payments (
+    id              text           primary key,
+    order_id        text           not null references orders,
+    provider        text           not null,
+    provider_txn_id text           not null,
+    status          text           not null,  -- pending, succeeded, failed
+    amount          numeric(20, 2) not null,
+    currency        char(3)        not null,
+    created_at      timestamptz    not null
+);
+create index on payments (provider, provider_txn_id);
+create index on payments (created_at);
+create table refunds (
+    id         text           primary key,
+    payment_id text           not null references payments,
+    amount     numeric(20, 2) not null,
+    created_at timestamptz    not null
+);
+create index on refunds (payment_id);
+create index on refunds (created_at);
