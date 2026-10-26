@@ -1,0 +1,24 @@
+# One provider transaction recorded as two payments: a webhook delivered twice
+# and handled twice, or a redirect and a webhook racing each other. The customer
+# paid once, the books show two payments. The fix is a unique index on
+# {provider: 1, provider_txn_id: 1}; this finds the documents that got in before it.
+# The window picks provider ids seen since $$since and counts all their payments,
+# so a webhook the provider sends again a week later is still caught.
+# Needs indexes on payments.created_at and payments.provider_txn_id.
+- $match: {status: succeeded, $expr: {$gte: ["$created_at", "$$since"]}}
+- $group: {_id: {provider: "$provider", txn: "$provider_txn_id"}}
+- $lookup: {from: payments, localField: _id.txn, foreignField: provider_txn_id, as: p}
+- $set:
+    p:
+      $filter:
+        input: "$p"
+        cond: {$and: [{$eq: ["$$this.provider", "$_id.provider"]}, {$eq: ["$$this.status", succeeded]}]}
+- $match: {p.1: {$exists: true}}
+- $set:
+    _id: {$concat: ["$_id.provider", ":", "$_id.txn"]}
+    currency: {$first: "$p.currency"}
+    payments: {$size: "$p"}
+    payment_ids: "$p._id"
+    extra: {$subtract: [{$sum: "$p.amount"}, {$min: "$p.amount"}]}
+- $project: {p: 0}
+- $sort: {_id: 1}

@@ -1,0 +1,13 @@
+# Payments refunded for more than they were paid: a refund retried after a
+# timeout when the first one went through, or a manual refund in the provider's
+# dashboard on top of the automatic one. Partial refunds that add up to the
+# payment are fine. Refunds live in the payment, so the window picks payments
+# whose latest refund is since $$since.
+- $match: {$expr: {$gte: [{$max: "$refunds.created_at"}, "$$since"]}}
+- $set:
+    refunded: {$sum: "$refunds.amount"}
+    refund_count: {$size: "$refunds"}
+- $match: {$expr: {$gt: ["$refunded", "$amount"]}}
+- $set: {over: {$subtract: ["$refunded", "$amount"]}}
+- $project: {refunds: 0}
+- $sort: {_id: 1}

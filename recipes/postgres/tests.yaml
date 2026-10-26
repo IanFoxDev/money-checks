@@ -14,3 +14,13 @@ tests:
     violations:
       - {id: acc_hugo, amount: 10.00 USD}
       - {id: acc_judy, amount: 15.00 EUR}
+  - check: duplicate_provider_txn
+    violations:
+      - {id: 'acmepay:A-1001', amount: 20.00 USD}
+  - check: refund_exceeds_payment
+    violations:
+      - {id: p8, amount: 40.00 EUR}
+      - {id: p9, amount: 5.00 USD}
+  - check: currency_mismatch
+    violations:
+      - {id: p7, amount: 10.00 EUR}

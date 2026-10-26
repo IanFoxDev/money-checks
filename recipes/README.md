@@ -22,6 +22,9 @@ shows what it catches and what it must leave alone.
 | `negative_balance` | An account goes below zero when two debits read the same old balance, or a timed out job is retried | [query](postgres/negative_balance.sql) | [pipeline](mongodb/negative_balance.yaml) |
 | `unbalanced_transaction` | A ledger transaction does not sum to zero in a currency: a fee booked with different amounts on each side, or a conversion that lost a leg when the process died between two inserts | [query](postgres/unbalanced_transaction.sql) | [pipeline](mongodb/unbalanced_transaction.yaml) |
 | `balance_matches_entries` | A stored balance is not the sum of its entries: updated twice on a retried request, or changed by hand without an entry | [query](postgres/balance_matches_entries.sql) | [pipeline](mongodb/balance_matches_entries.yaml) |
+| `duplicate_provider_txn` | One provider transaction recorded as two payments: a webhook handled twice, or a redirect racing the webhook | [query](postgres/duplicate_provider_txn.sql) | [pipeline](mongodb/duplicate_provider_txn.yaml) |
+| `refund_exceeds_payment` | Refunds add up to more than the payment: a refund retried after a timeout, or a manual refund on top of the automatic one | [query](postgres/refund_exceeds_payment.sql) | [pipeline](mongodb/refund_exceeds_payment.yaml) |
+| `currency_mismatch` | A payment in another currency than its order, which every check comparing amounts only lets through | [query](postgres/currency_mismatch.sql) | [pipeline](mongodb/currency_mismatch.yaml) |
 
 ## Test them
 

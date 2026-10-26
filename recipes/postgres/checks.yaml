@@ -38,3 +38,33 @@ checks:
     amount: {field: difference, unit: major, currency_field: currency}
     show: [owner, balance, entries_sum]
     expect: {query: select count(*) from accounts}
+
+  - name: duplicate_provider_txn
+    description: One provider transaction is recorded as more than one payment.
+    source: app
+    window: 24h
+    query_file: duplicate_provider_txn.sql
+    id: id
+    amount: {field: extra, unit: major, currency_field: currency}
+    show: [payments, payment_ids]
+    expect: {query: "select count(*) from payments where status = 'succeeded'"}
+
+  - name: refund_exceeds_payment
+    description: A payment is refunded for more than was paid.
+    source: app
+    window: 24h
+    query_file: refund_exceeds_payment.sql
+    id: id
+    amount: {field: over, unit: major, currency_field: currency}
+    show: [amount, refunded, refunds]
+    expect: {query: select count(*) from refunds}
+
+  - name: currency_mismatch
+    description: A successful payment is in another currency than its order.
+    source: app
+    window: 24h
+    query_file: currency_mismatch.sql
+    id: id
+    amount: {field: amount, unit: major, currency_field: currency}
+    show: [order_id, order_amount, order_currency]
+    expect: {query: "select count(*) from payments where status = 'succeeded'"}

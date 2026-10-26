@@ -41,3 +41,33 @@ checks:
     amount: {field: difference, unit: major, currency_field: currency}
     show: [owner, balance, entries_sum]
     expect: {pipeline: [{$count: n}]}
+
+  - name: duplicate_provider_txn
+    description: One provider transaction is recorded as more than one payment.
+    source: app
+    collection: payments
+    window: 24h
+    pipeline_file: duplicate_provider_txn.yaml
+    amount: {field: extra, unit: major, currency_field: currency}
+    show: [payments, payment_ids]
+    expect: {pipeline: [{$match: {status: succeeded}}, {$count: n}]}
+
+  - name: refund_exceeds_payment
+    description: A payment is refunded for more than was paid.
+    source: app
+    collection: payments
+    window: 24h
+    pipeline_file: refund_exceeds_payment.yaml
+    amount: {field: over, unit: major, currency_field: currency}
+    show: [amount, refunded, refund_count]
+    expect: {pipeline: [{$match: {refunds.0: {$exists: true}}}, {$count: n}]}
+
+  - name: currency_mismatch
+    description: A successful payment is in another currency than its order.
+    source: app
+    collection: payments
+    window: 24h
+    pipeline_file: currency_mismatch.yaml
+    amount: {field: amount, unit: major, currency_field: currency}
+    show: [order_id, order_amount, order_currency]
+    expect: {pipeline: [{$match: {status: succeeded}}, {$count: n}]}

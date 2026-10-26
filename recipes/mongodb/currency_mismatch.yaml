@@ -1,0 +1,11 @@
+# Successful payments in another currency than their order: a checkout that
+# sent the default currency to the provider, or a price list switched while the
+# cart was open. 10.00 EUR paid for a 10.00 USD order passes every check that
+# compares amounts only.
+- $match: {status: succeeded, $expr: {$gte: ["$created_at", "$$since"]}}
+- $lookup: {from: orders, localField: order_id, foreignField: _id, as: o}
+- $unwind: "$o"
+- $match: {$expr: {$ne: ["$currency", "$o.currency"]}}
+- $set: {order_amount: "$o.amount", order_currency: "$o.currency"}
+- $project: {o: 0, refunds: 0}
+- $sort: {_id: 1}
