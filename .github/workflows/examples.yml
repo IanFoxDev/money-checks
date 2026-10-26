@@ -130,3 +130,16 @@ jobs:
             -schema-location default \
             -schema-location 'https://raw.githubusercontent.com/datreeio/CRDs-catalog/main/{{.Group}}/{{.ResourceKind}}_{{.ResourceAPIVersion}}.json' \
             manifests.yaml
+
+  recipes:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: recipes
+    steps:
+      - uses: actions/checkout@v7
+      - run: docker compose build
+      - name: PostgreSQL recipes find exactly the planted violations
+        run: docker compose run --rm money-checks test -c /recipes/postgres/checks.yaml -t /recipes/postgres/tests.yaml
+      - name: MongoDB recipes find exactly the planted violations
+        run: docker compose run --rm money-checks test -c /recipes/mongodb/checks.yaml -t /recipes/mongodb/tests.yaml
