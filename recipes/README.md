@@ -20,6 +20,7 @@ shows what it catches and what it must leave alone.
 | Recipe | The bug it catches | PostgreSQL | MongoDB |
 |---|---|---|---|
 | `negative_balance` | An account goes below zero when two debits read the same old balance, or a timed out job is retried | [query](postgres/negative_balance.sql) | [pipeline](mongodb/negative_balance.yaml) |
+| `unbalanced_transaction` | A ledger transaction does not sum to zero in a currency: a fee booked with different amounts on each side, or a conversion that lost a leg when the process died between two inserts | [query](postgres/unbalanced_transaction.sql) | [pipeline](mongodb/unbalanced_transaction.yaml) |
 
 ## Test them
 

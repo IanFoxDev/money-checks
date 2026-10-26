@@ -21,5 +21,6 @@ create table entries (
     amount     numeric(20, 2) not null,
     created_at timestamptz    not null
 );
+create index on entries (txn_id);
 create index on entries (account_id);
 create index on entries (created_at);

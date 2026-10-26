@@ -1,0 +1,17 @@
+# Transactions whose entries do not sum to zero in a currency: a fee booked with
+# a different amount on each side, or a conversion that lost a leg when the
+# process died between two inserts without a multi-document transaction.
+# The window picks the transactions with an entry since $$since and sums all
+# their entries, so a transaction that started before the window is not cut in
+# half. Needs indexes on entries.created_at and entries.txn_id.
+- $match: {$expr: {$gte: ["$created_at", "$$since"]}}
+- $group: {_id: "$txn_id"}
+- $lookup: {from: entries, localField: _id, foreignField: txn_id, as: e}
+- $unwind: "$e"
+- $group:
+    _id: {txn: "$_id", currency: "$e.currency"}
+    imbalance: {$sum: "$e.amount"}
+    entries: {$sum: 1}
+- $match: {imbalance: {$ne: 0}}
+- $set: {_id: {$concat: ["$_id.txn", ":", "$_id.currency"]}, currency: "$_id.currency"}
+- $sort: {_id: 1}

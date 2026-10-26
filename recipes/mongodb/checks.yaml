@@ -21,3 +21,13 @@ checks:
     amount: {field: balance, unit: major, currency_field: currency}
     show: [owner]
     expect: {pipeline: [{$count: n}]}
+
+  - name: unbalanced_transaction
+    description: A ledger transaction's entries do not sum to zero in a currency.
+    source: app
+    collection: entries
+    window: 24h
+    pipeline_file: unbalanced_transaction.yaml
+    amount: {field: imbalance, unit: major, currency_field: currency}
+    show: [entries]
+    expect: {pipeline: [{$count: n}]}
