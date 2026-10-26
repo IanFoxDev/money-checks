@@ -1,7 +1,22 @@
 [
   {"_id": "acc_anna", "owner": "anna", "currency": "USD", "balance": {"$numberDecimal": "25.00"}},
   {"_id": "acc_ben", "owner": "ben", "currency": "EUR", "balance": {"$numberDecimal": "-3.50"}},
-  {"_id": "acc_carl", "owner": "carl", "currency": "USD", "balance": {"$numberDecimal": "0"}},
-  {"_id": "acc_dana", "owner": "dana", "currency": "JPY", "balance": {"$numberDecimal": "-500"}},
-  {"_id": "acc_house", "owner": "house", "currency": "USD", "balance": {"$numberDecimal": "-120.00"}, "allow_negative": true}
+  {"_id": "acc_carl", "owner": "carl", "currency": "USD", "balance": {"$numberDecimal": "0.00"}},
+  {"_id": "acc_dana", "owner": "dana", "currency": "JPY", "balance": {"$numberDecimal": "-500.00"}},
+  {"_id": "acc_eve", "owner": "eve", "currency": "USD", "balance": {"$numberDecimal": "118.00"}},
+  {"_id": "acc_frank", "owner": "frank", "currency": "USD", "balance": {"$numberDecimal": "11.00"}},
+  {"_id": "acc_gina", "owner": "gina", "currency": "EUR", "balance": {"$numberDecimal": "0.00"}},
+  {"_id": "acc_gina_usd", "owner": "gina", "currency": "USD", "balance": {"$numberDecimal": "10.00"}},
+  {"_id": "acc_hugo", "owner": "hugo", "currency": "USD", "balance": {"$numberDecimal": "50.00"}},
+  {"_id": "acc_ivan", "owner": "ivan", "currency": "USD", "balance": {"$numberDecimal": "0.00"}},
+  {"_id": "acc_judy", "owner": "judy", "currency": "EUR", "balance": {"$numberDecimal": "15.00"}},
+  {"_id": "acc_house", "owner": "house", "currency": "USD", "balance": {"$numberDecimal": "-120.00"}, "allow_negative": true},
+  {"_id": "cash_usd", "owner": "house", "currency": "USD", "balance": {"$numberDecimal": "-70.00"}, "allow_negative": true},
+  {"_id": "cash_eur", "owner": "house", "currency": "EUR", "balance": {"$numberDecimal": "-29.00"}, "allow_negative": true},
+  {"_id": "cash_jpy", "owner": "house", "currency": "JPY", "balance": {"$numberDecimal": "-1000.00"}, "allow_negative": true},
+  {"_id": "revenue_usd", "owner": "house", "currency": "USD", "balance": {"$numberDecimal": "6.50"}, "allow_negative": true},
+  {"_id": "revenue_eur", "owner": "house", "currency": "EUR", "balance": {"$numberDecimal": "13.50"}, "allow_negative": true},
+  {"_id": "revenue_jpy", "owner": "house", "currency": "JPY", "balance": {"$numberDecimal": "1500.00"}, "allow_negative": true},
+  {"_id": "fx_usd", "owner": "house", "currency": "USD", "balance": {"$numberDecimal": "-10.00"}, "allow_negative": true},
+  {"_id": "fx_eur", "owner": "house", "currency": "EUR", "balance": {"$numberDecimal": "9.00"}, "allow_negative": true}
 ]

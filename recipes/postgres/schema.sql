@@ -11,3 +11,15 @@ create table accounts (
     -- House and credit accounts may go below zero, customer ones may not.
     allow_negative boolean        not null default false
 );
+
+-- Double-entry: each transaction moves money between accounts, and its entries
+-- sum to zero in each currency. Credits are positive, debits negative.
+create table entries (
+    id         bigserial      primary key,
+    txn_id     text           not null,
+    account_id text           not null references accounts,
+    amount     numeric(20, 2) not null,
+    created_at timestamptz    not null
+);
+create index on entries (account_id);
+create index on entries (created_at);
