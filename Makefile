@@ -3,8 +3,9 @@ LINT_IMAGE := golangci/golangci-lint:v2.14.0
 export MONEY_CHECKS_TEST_PG_DSN ?= postgres://checks:checks@127.0.0.1:55434/checks
 export MONEY_CHECKS_TEST_MONGO_URI ?= mongodb://root:root@127.0.0.1:55435/?authSource=admin
 export MONEY_CHECKS_TEST_CLICKHOUSE_URL ?= http://checks:checks@127.0.0.1:55436/
+export MONEY_CHECKS_TEST_MYSQL_DSN ?= root:root@tcp(127.0.0.1:55437)/
 
-.PHONY: test vet fmt lint build check postgres-up postgres-down mongo-up mongo-down clickhouse-up clickhouse-down
+.PHONY: test vet fmt lint build check postgres-up postgres-down mongo-up mongo-down clickhouse-up clickhouse-down mysql-up mysql-down
 
 test:
 	go test -race ./...
@@ -43,3 +44,10 @@ clickhouse-up:
 
 clickhouse-down:
 	docker rm -f money-checks-clickhouse
+
+mysql-up:
+	docker run -d --rm --name money-checks-mysql -e MYSQL_ROOT_PASSWORD=root -p 55437:3306 mysql:8.4
+	until docker exec money-checks-mysql mysql -uroot -proot -h127.0.0.1 -e 'select 1' >/dev/null 2>&1; do sleep 1; done
+
+mysql-down:
+	docker rm -f money-checks-mysql

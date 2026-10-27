@@ -46,10 +46,12 @@ func TestOpenUnreachable(t *testing.T) {
 	t.Setenv("MC_DOWN_MONGO", "mongodb://"+addr+"/?serverSelectionTimeoutMS=300&connectTimeoutMS=300")
 	t.Setenv("MC_DOWN_PG", "postgres://u:p@"+addr+"/db?connect_timeout=1")
 	t.Setenv("MC_DOWN_CH", "http://"+addr+"/")
+	t.Setenv("MC_DOWN_MYSQL", "u:p@tcp("+addr+")/shop?timeout=1s")
 	for name, s := range map[string]config.Source{
 		"mongodb":    {MongoDB: &config.MongoDB{URIEnv: "MC_DOWN_MONGO", Database: "shop"}},
 		"postgres":   {Postgres: &config.Postgres{DSNEnv: "MC_DOWN_PG"}},
 		"clickhouse": {ClickHouse: &config.ClickHouse{URLEnv: "MC_DOWN_CH", Database: "stats"}},
+		"mysql":      {MySQL: &config.MySQL{DSNEnv: "MC_DOWN_MYSQL"}},
 	} {
 		_, err := Open(context.Background(), name, s, func(string) {})
 		if err == nil || !Unreachable(err) {

@@ -2,11 +2,13 @@ package source
 
 import (
 	"context"
+	"database/sql/driver"
 	"errors"
 	"io"
 	"net"
 	"syscall"
 
+	"github.com/go-sql-driver/mysql"
 	"github.com/jackc/pgx/v5/pgconn"
 	"go.mongodb.org/mongo-driver/v2/mongo"
 	"go.mongodb.org/mongo-driver/v2/x/mongo/driver/topology"
@@ -35,5 +37,6 @@ func Unreachable(err error) bool {
 	var conn *pgconn.ConnectError
 	return mongo.IsNetworkError(err) || errors.As(err, &op) || errors.As(err, &conn) ||
 		errors.Is(err, syscall.ECONNREFUSED) || errors.Is(err, syscall.ECONNRESET) ||
-		errors.Is(err, io.ErrUnexpectedEOF)
+		errors.Is(err, io.ErrUnexpectedEOF) || errors.Is(err, mysql.ErrInvalidConn) ||
+		errors.Is(err, driver.ErrBadConn)
 }
