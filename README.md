@@ -4,7 +4,7 @@
 [![examples](https://github.com/IanFoxDev/money-checks/actions/workflows/examples.yml/badge.svg)](https://github.com/IanFoxDev/money-checks/actions/workflows/examples.yml)
 
 Money invariants as code. A check is a query against your own database, a MongoDB
-aggregation pipeline or SQL for PostgreSQL or ClickHouse, that returns the rows
+aggregation pipeline or SQL for PostgreSQL, MySQL or ClickHouse, that returns the rows
 breaking a rule:
 a subscription charged twice for one month, a user with two active subscriptions,
 refunds larger than the payment, a ledger transaction that does not sum to zero.
@@ -287,8 +287,8 @@ Amounts are `int64` minor units with the ISO 4217 exponent of their currency, fr
 the database to the report. Nothing is held in a float and nothing is rounded.
 
 - Integers are minor units (`unit: minor`) or whole major units (`unit: major`).
-- Decimal strings, MongoDB `Decimal128`, PostgreSQL `numeric` and ClickHouse
-  `Decimal` are parsed digit by digit: `10.99` USD is 1099, `1200` JPY is 1200.
+- Decimal strings, MongoDB `Decimal128`, PostgreSQL `numeric`, MySQL `DECIMAL` and
+  ClickHouse `Decimal` are parsed digit by digit: `10.99` USD is 1099, `1200` JPY is 1200.
 - A MongoDB double, which is how PHP and JavaScript code often stores prices, is read
   through its shortest decimal form: `10.1` is 1010 cents. A double that is not a
   whole number of minor units fails the check with the row and the value.
@@ -323,6 +323,12 @@ enough.
   with `CHECK GRANT` and stops if the user can insert, alter, truncate, drop or create
   tables in the database, with the same `require_read_only: false` escape. The
   server never runs two statements in one request.
+- **MySQL**: before every check its connection gets `transaction_read_only = ON`,
+  set again each time because any user can turn it off, `max_execution_time` and
+  the UTC time zone. Not a `START TRANSACTION READ ONLY`: CREATE, DROP and TRUNCATE
+  commit it and run anyway. A DSN cannot turn on `multiStatements`. At start
+  money-checks reads `SHOW GRANTS` and stops if the user can write, with the same
+  `require_read_only: false` escape. Why: [ADR 0008](docs/adr/0008-mysql-read-only.md).
 
 Connection strings and the Slack webhook come from environment variables named in the
 file, never from the file itself. Why it is built this way:
@@ -357,7 +363,7 @@ subscription systems share, ready to copy: a negative balance, a ledger
 transaction that does not sum to zero, one provider transaction recorded as two
 payments, refunds over the payment, a payment stuck in pending, an order paid and
 never fulfilled, daily totals that differ between the app and ClickHouse, and
-more. Each comes for PostgreSQL and MongoDB, or ClickHouse, with rows that break it,
+more. Each comes for PostgreSQL, MySQL and MongoDB, or ClickHouse, with rows that break it,
 rows next to them that must not, and a test in CI.
 
 ## Example

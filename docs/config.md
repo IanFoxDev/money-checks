@@ -37,6 +37,10 @@ sources:
       url_env: STATS_CLICKHOUSE_URL  # the environment variable with the HTTP URL
       database: stats
       require_read_only: true        # default true
+  shop:
+    mysql:
+      dsn_env: SHOP_MYSQL_DSN      # the environment variable with the DSN
+      require_read_only: true      # default true
 ```
 
 The URI, the DSN and the URL are read from the environment when the source is opened, so the
@@ -80,6 +84,36 @@ Values come back as text, so `Decimal`, `UInt64` and `Float64` are read like
 `remote()` only read, but they reach other servers, and only grants keep them out.
 Why ClickHouse is read this way: `docs/adr/0003-clickhouse.md`.
 
+**mysql.** MySQL 8.0 and later; MariaDB is refused. The DSN is the one
+`go-sql-driver/mysql` takes: `checks:secret@tcp(host:3306)/shop`, with `?tls=true`
+or other parameters after it. Before every check money-checks sets, on the
+connection the check runs on:
+
+```sql
+SET SESSION transaction_read_only = ON, max_execution_time = <timeout + 1s>,
+    time_zone = '+00:00', @since = ..., @until = ...
+```
+
+Any user may turn these off, so they are set again before every check, and
+nothing one check does to its session reaches the next. `multiStatements`,
+`interpolateParams`, `parseTime` and `allowAllFiles` are off whatever the DSN says:
+one statement per query, parameters never put into its text. Not `START TRANSACTION
+READ ONLY`: CREATE, DROP and TRUNCATE commit it and run anyway. The check's own
+timeout stops a slow query; `max_execution_time` stops it on the server a second
+later, once the client has gone.
+
+At start money-checks reads `SHOW GRANTS`, the active roles included, and stops if
+the user has ALL, INSERT, UPDATE, DELETE, CREATE, DROP, ALTER, INDEX, CREATE VIEW,
+CREATE ROUTINE, ALTER ROUTINE, TRIGGER, EVENT or FILE on `*.*`, on the database of the
+DSN or on a table in it (on any database when the DSN names none). With
+`require_read_only: false` it runs anyway and prints a warning on every run.
+
+Values come back as text, so `DECIMAL` is read like `numeric` on PostgreSQL.
+`TIMESTAMP` columns are read and compared in UTC; a `DATETIME` column is compared as
+it is, so it must hold UTC too. Give the user `SELECT` on one database:
+`GRANT SELECT ON shop.* TO 'checks'@'%'`. Why MySQL is read this way:
+`docs/adr/0008-mysql-read-only.md`.
+
 ## checks
 
 A list. Checks run in this order, one at a time.
@@ -93,9 +127,9 @@ A list. Checks run in this order, one at a time.
 | `collection` | mongodb | the collection the pipeline runs on |
 | `pipeline` | mongodb | a list of stages, or `pipeline_file` |
 | `pipeline_file` | mongodb | a JSON or YAML file with the stages, relative to the config file or absolute |
-| `query` | postgres, clickhouse | one SQL statement, or `query_file` |
-| `query_file` | postgres, clickhouse | a file with the statement, relative to the config file or absolute |
-| `id` | | the column that identifies a row; default `_id` for mongodb, required for postgres and clickhouse |
+| `query` | postgres, clickhouse, mysql | one SQL statement, or `query_file` |
+| `query_file` | postgres, clickhouse, mysql | a file with the statement, relative to the config file or absolute |
+| `id` | | the column that identifies a row; default `_id` for mongodb, required for postgres, clickhouse and mysql |
 | `amount` | | where the money of a row is, below; without it the check only counts rows |
 | `show` | | columns shown next to the id in the report |
 | `mask` | | columns of `show` to mask |
@@ -204,9 +238,24 @@ microseconds, so the configuration check refuses it.
       group by day, currency
 ```
 
+On MySQL it is the user variable `@since`, a `DATETIME(6)` in UTC, which the query
+may use as many times as it needs:
+
+```yaml
+    query: |
+      select payment_id, sum(amount) as amount, currency
+      from refunds
+      where payment_id in (select payment_id from refunds where created_at >= @since)
+      group by payment_id, currency
+      having count(*) > 1
+```
+
+A variable of your own named `@since` or `@until` gets the window instead.
+
 Nothing is put into the text of the query. On a full pass the start is
 `0001-01-01T00:00:00Z` (`1970-01-01` on ClickHouse, so that `toDate()` of it does
-not wrap around), so the same query reads every row. A check with `window` must use
+not wrap around, and `1000-01-01`, the earliest `DATETIME`, on MySQL), so the same
+query reads every row. A check with `window` must use
 the parameter, and a query or pipeline that uses it must have a `window`.
 `window` is at least `serve.interval`, or rows written between two runs would wait
 for the next full pass. Hours are the largest unit: a week is `168h`.
@@ -314,8 +363,8 @@ query reads only the rows before it:
           group by day, currency
 ```
 
-The end is `$$until` in a pipeline, `{until:DateTime64(6, 'UTC')}` on ClickHouse and
-`$2` on PostgreSQL. A PostgreSQL query with `$2` uses `$1` too, because PostgreSQL
+The end is `$$until` in a pipeline, `{until:DateTime64(6, 'UTC')}` on ClickHouse,
+`@until` on MySQL and `$2` on PostgreSQL. A PostgreSQL query with `$2` uses `$1` too, because PostgreSQL
 cannot tell the type of `$2` alone; without a window `$1` is
 `0001-01-01T00:00:00Z`. Every side of a check with `settle` must use the end, and
 a query that uses it needs `settle`. Only `compare` checks have it: a check of one

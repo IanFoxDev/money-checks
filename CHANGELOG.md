@@ -10,7 +10,13 @@ configuration, the report format or the metric names; such changes are marked
 
 ### Added
 
-- `recipes/`: eleven checks to copy for PostgreSQL, MongoDB and ClickHouse, a
+- MySQL source, 8.0 and later: `mysql: {dsn_env: ...}`. Before every check its
+  connection is set again to `transaction_read_only = ON`, the check's timeout and
+  UTC, because any user can turn these off and `START TRANSACTION READ ONLY` lets
+  CREATE, DROP and TRUNCATE through. The window is `@since` and `@until`. A user
+  with a privilege that writes stops the run unless `require_read_only: false`.
+  See `docs/adr/0008-mysql-read-only.md`.
+- `recipes/`: eleven checks to copy for PostgreSQL, MySQL, MongoDB and ClickHouse, a
   negative balance, an unbalanced ledger transaction, a balance that is not the
   sum of its entries, a provider transaction recorded twice, refunds over the
   payment, a payment in another currency than its order, a payment stuck in
