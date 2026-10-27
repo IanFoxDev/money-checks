@@ -1,0 +1,42 @@
+# What each recipe must find in seed.sql, by id and amount.
+version: 1
+tests:
+  - check: negative_balance
+    violations:
+      - {id: acc_ben, amount: -3.50 EUR}
+      - {id: acc_dana, amount: -500 JPY}
+  - check: unbalanced_transaction
+    violations:
+      - {id: 't11:USD', amount: -0.50 USD}
+      - {id: 't12:EUR', amount: -10.00 EUR}
+      - {id: 't12:USD', amount: 11.00 USD}
+  - check: balance_matches_entries
+    violations:
+      - {id: acc_hugo, amount: 10.00 USD}
+      - {id: acc_judy, amount: 15.00 EUR}
+  - check: duplicate_provider_txn
+    violations:
+      - {id: 'acmepay:A-1001', amount: 20.00 USD}
+  - check: refund_exceeds_payment
+    violations:
+      - {id: p8, amount: 40.00 EUR}
+      - {id: p9, amount: 5.00 USD}
+  - check: currency_mismatch
+    violations:
+      - {id: p7, amount: 10.00 EUR}
+  - check: stuck_in_pending
+    violations:
+      - {id: p10, amount: 30.00 USD}
+  - check: paid_not_granted
+    violations:
+      - {id: o11, amount: 12.00 EUR}
+  - check: access_after_expiry
+    violations:
+      - {id: s2, amount: 9.99 USD}
+      - {id: s6, amount: 1200 JPY}
+  - check: daily_totals_match
+    violations:
+      # The difference, analytics minus the app.
+      - {id: 2026-10-02/EUR, amount: 15.00 EUR}
+      - {id: 2026-10-02/JPY, amount: 500 JPY}
+      - {id: 2026-10-02/USD, amount: -25.00 USD}

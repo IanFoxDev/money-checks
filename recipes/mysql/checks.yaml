@@ -1,0 +1,120 @@
+# Money invariants for MySQL 8.0 and later. Each query lives in its own file: copy the
+# file and the check, change the table and column names to yours.
+# CI runs money-checks test with tests.yaml against schema.sql and seed.sql.
+version: 1
+defaults:
+  timeout: 30s
+sources:
+  app:
+    mysql:
+      dsn_env: APP_MYSQL_DSN
+  analytics:
+    clickhouse:
+      url_env: ANALYTICS_CLICKHOUSE_URL
+      database: analytics
+
+checks:
+  - name: negative_balance
+    description: An account that may not go below zero is below zero.
+    source: app
+    query_file: negative_balance.sql
+    id: id
+    amount: {field: balance, unit: major, currency_field: currency}
+    show: [owner]
+    expect: {query: select count(*) from accounts}
+
+  - name: unbalanced_transaction
+    description: A ledger transaction's entries do not sum to zero in a currency.
+    source: app
+    window: 24h
+    query_file: unbalanced_transaction.sql
+    id: id
+    amount: {field: imbalance, unit: major, currency_field: currency}
+    show: [entries]
+    expect: {query: select count(*) from entries}
+
+  - name: balance_matches_entries
+    description: An account's stored balance is not the sum of its entries.
+    source: app
+    every: 6h
+    query_file: balance_matches_entries.sql
+    id: id
+    amount: {field: difference, unit: major, currency_field: currency}
+    show: [owner, balance, entries_sum]
+    expect: {query: select count(*) from accounts}
+
+  - name: duplicate_provider_txn
+    description: One provider transaction is recorded as more than one payment.
+    source: app
+    window: 24h
+    query_file: duplicate_provider_txn.sql
+    id: id
+    amount: {field: extra, unit: major, currency_field: currency}
+    show: [payments, payment_ids]
+    expect: {query: "select count(*) from payments where status = 'succeeded'"}
+
+  - name: refund_exceeds_payment
+    description: A payment is refunded for more than was paid.
+    source: app
+    window: 24h
+    query_file: refund_exceeds_payment.sql
+    id: id
+    amount: {field: over, unit: major, currency_field: currency}
+    show: [amount, refunded, refunds]
+    expect: {query: select count(*) from refunds}
+
+  - name: currency_mismatch
+    description: A successful payment is in another currency than its order.
+    source: app
+    window: 24h
+    query_file: currency_mismatch.sql
+    id: id
+    amount: {field: amount, unit: major, currency_field: currency}
+    show: [order_id, order_amount, order_currency]
+    expect: {query: "select count(*) from payments where status = 'succeeded'"}
+
+  - name: stuck_in_pending
+    description: A payment is still pending an hour after it started.
+    source: app
+    query_file: stuck_in_pending.sql
+    id: id
+    amount: {field: amount, unit: major, currency_field: currency}
+    show: [provider, provider_txn_id, created_at]
+    expect: {query: select count(*) from payments}
+
+  - name: paid_not_granted
+    description: An order was paid more than 30 minutes ago and is not fulfilled.
+    source: app
+    query_file: paid_not_granted.sql
+    id: id
+    amount: {field: amount, unit: major, currency_field: currency}
+    show: [payment_id, paid_at]
+    expect: {query: "select count(*) from payments where status = 'succeeded'"}
+
+  - name: access_after_expiry
+    description: A subscription is active days after its paid period ended.
+    source: app
+    query_file: access_after_expiry.sql
+    id: id
+    amount: {field: price, unit: major, currency_field: currency}
+    show: [owner, current_period_end]
+    expect: {query: select count(*) from subscriptions}
+
+  - name: daily_totals_match
+    description: Successful payments per day and currency match the analytics in ClickHouse.
+    # A payment of the last 15 minutes may still be on its way to ClickHouse:
+    # both sides read only the rows before that.
+    window: 720h
+    settle: 15m
+    compare:
+      left:
+        source: app
+        query_file: daily_totals_match.sql
+        expect: {query: "select count(*) from payments where status = 'succeeded'"}
+      right:
+        source: analytics
+        query_file: ../clickhouse/daily_totals.sql
+        expect: {query: select count() from payments}
+      key: [day, currency]
+      amount: {field: amount, unit: major, currency_field: currency}
+      counts: [payments]
