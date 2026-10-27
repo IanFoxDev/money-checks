@@ -119,6 +119,8 @@ sources:
   none: {}
   ch:
     clickhouse: {}
+  my:
+    mysql: {}
 checks:
   - name: Bad-Name
     source: nouri
@@ -156,9 +158,10 @@ serve: {interval: 10s, slack: {}}
 	for _, want := range []string{
 		"version: want 1",
 		"defaults.samples",
-		"sources.both: set one of mongodb, postgres and clickhouse, not several",
-		"sources.three: set one of mongodb, postgres and clickhouse, not several",
-		"sources.none: set mongodb, postgres or clickhouse",
+		"sources.both: set one of mongodb, postgres, clickhouse and mysql, not several",
+		"sources.three: set one of mongodb, postgres, clickhouse and mysql, not several",
+		"sources.none: set mongodb, postgres, clickhouse or mysql",
+		"sources.my.mysql.dsn_env",
 		"sources.ch.clickhouse.url_env",
 		"sources.ch.clickhouse.database: required",
 		"check ch_pipeline: collection and pipeline are for mongodb sources; ch is clickhouse, use query",
@@ -169,14 +172,14 @@ serve: {interval: 10s, slack: {}}
 		"$merge writes to the database",
 		"$out writes to the database",
 		"stage 1 (line",
-		"query is for postgres and clickhouse sources",
+		"query is for postgres, clickhouse and mysql sources",
 		"check dup: the name is used twice",
 		"set query or query_file",
 		"id: the column",
 		"amount.unit: want minor or major",
 		"amount.currency: unknown \"ZZZ\"",
 		"mask: \"email\" is not in show",
-		"source: unknown \"missing\", known: both, ch, none, nouri, pg, three",
+		"source: unknown \"missing\", known: both, ch, my, none, nouri, pg, three",
 		"amount: set currency or currency_field",
 		"serve.interval: at least 1m",
 		"serve.slack.webhook_env",
@@ -225,6 +228,7 @@ sources:
   billing: {mongodb: {uri_env: A, database: shop}}
   ledger: {postgres: {dsn_env: B}}
   stats: {clickhouse: {url_env: C, database: stats}}
+  shop: {mysql: {dsn_env: D}}
 checks:
   - name: rebills
     source: billing
@@ -240,6 +244,11 @@ checks:
   - name: daily
     source: stats
     query: "select day as id from daily where day >= { since : DateTime64(6, 'UTC') }"
+    id: id
+    window: 24h
+  - name: orders
+    source: shop
+    query: select id from orders where updated_at >= @Since or paid_at >= @since
     id: id
     window: 24h
 serve: {interval: 1h}
@@ -258,7 +267,12 @@ sources:
   billing: {mongodb: {uri_env: A, database: shop}}
   ledger: {postgres: {dsn_env: B}}
   stats: {clickhouse: {url_env: C, database: stats}}
+  shop: {mysql: {dsn_env: D}}
 checks:
+  - {name: my_no_since, source: shop, query: select @since_x as id, id: id, window: 24h}
+  - {name: my_no_window, source: shop, query: select @since as id, id: id}
+  - {name: my_no_until, source: shop, query: select @since as id, id: id, window: 24h, settle: 15m}
+  - {name: my_no_settle, source: shop, query: select @until as id, id: id}
   - {name: ch_no_since, source: stats, query: select 1 as id, id: id, window: 24h}
   - {name: ch_no_window, source: stats, query: "select 1 as id where now() > {since:DateTime64(6, 'UTC')}", id: id}
   - {name: ch_zone, source: stats, query: "select 1 as id where now() > {since:DateTime64(6)}", id: id, window: 24h}
@@ -281,6 +295,10 @@ serve: {interval: 1h, full_every: 30m, retry: 2h}
 		"check no_since: window: the pipeline must compare a time field with $$since",
 		"check no_window: pipeline: $$since is the start of the window; set window",
 		"check no_param: window: the query must compare a time column with $1",
+		"check my_no_since: window: the query must compare a time column with @since",
+		"check my_no_window: query: @since is the start of the window; set window",
+		"check my_no_until: settle: the query must compare a time column with @until",
+		"check my_no_settle: query: @until is the end of the rows that have settled; set settle",
 		"check ch_no_since: window: the query must compare a time column with {since:DateTime64(6, 'UTC')}",
 		"check ch_no_window: query: {since:...} is the start of the window; set window",
 		"check ch_zone: query: write {since:DateTime64(6, 'UTC')}, not {since:DateTime64(6)}",

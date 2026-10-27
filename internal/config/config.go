@@ -51,15 +51,18 @@ type Source struct {
 	MongoDB    *MongoDB    `yaml:"mongodb"`
 	Postgres   *Postgres   `yaml:"postgres"`
 	ClickHouse *ClickHouse `yaml:"clickhouse"`
+	MySQL      *MySQL      `yaml:"mysql"`
 }
 
-// Kind is "mongodb", "postgres" or "clickhouse".
+// Kind is "mongodb", "postgres", "clickhouse" or "mysql".
 func (s Source) Kind() string {
 	switch {
 	case s.MongoDB != nil:
 		return "mongodb"
 	case s.ClickHouse != nil:
 		return "clickhouse"
+	case s.MySQL != nil:
+		return "mysql"
 	default:
 		return "postgres"
 	}
@@ -87,6 +90,14 @@ type ClickHouse struct {
 	RequireReadOnly *bool `yaml:"require_read_only"`
 }
 
+// MySQL runs every check in a read-only session in UTC; see
+// docs/adr/0008-mysql-read-only.md.
+type MySQL struct {
+	DSNEnv string `yaml:"dsn_env"`
+	// RequireReadOnly stops the run when the user has a privilege that writes. Default true.
+	RequireReadOnly *bool `yaml:"require_read_only"`
+}
+
 // Check is one invariant: a query that returns the rows that break it.
 type Check struct {
 	Name        string `yaml:"name"`
@@ -99,7 +110,7 @@ type Check struct {
 	Pipeline     yaml.Node `yaml:"pipeline"`
 	PipelineFile string    `yaml:"pipeline_file"`
 
-	// PostgreSQL and ClickHouse.
+	// PostgreSQL, ClickHouse and MySQL.
 	Query     string `yaml:"query"`
 	QueryFile string `yaml:"query_file"`
 
@@ -110,16 +121,16 @@ type Check struct {
 	Samples *int          `yaml:"samples"`
 	Timeout time.Duration `yaml:"timeout"`
 	// Window, when set, lets a run read only the rows of the last Window: the
-	// query gets the start of the window as $1 (postgres), $$since (mongodb) or
-	// {since:DateTime64(6, 'UTC')} (clickhouse).
+	// query gets the start of the window as $1 (postgres), $$since (mongodb),
+	// {since:DateTime64(6, 'UTC')} (clickhouse) or @since (mysql).
 	Window time.Duration `yaml:"window"`
 	// Every, when set, makes serve run the check every Every instead of every
 	// serve.interval; a multiple of it. A full run still runs every check.
 	Every time.Duration `yaml:"every"`
 	// Settle, on a compare check, leaves out the rows of the last Settle on both
 	// sides, which are still on their way from one to the other: the query gets
-	// the end as $2 (postgres), $$until (mongodb) or {until:DateTime64(6, 'UTC')}
-	// (clickhouse).
+	// the end as $2 (postgres), $$until (mongodb), {until:DateTime64(6, 'UTC')}
+	// (clickhouse) or @until (mysql).
 	Settle time.Duration `yaml:"settle"`
 
 	// Expect, when set, must find data before the check runs; see
@@ -220,6 +231,8 @@ func (ch Check) uses(kind, param string) bool {
 		return usesVar(&ch.Pipeline, param)
 	case "clickhouse":
 		return clickhouseParam(param).MatchString(ch.Query)
+	case "mysql":
+		return mysqlVar(param).MatchString(ch.Query)
 	default:
 		if param == "since" {
 			return strings.Contains(ch.Query, "$1")
@@ -441,6 +454,10 @@ func (c *Config) applyDefaults() {
 			yes := true
 			s.ClickHouse.RequireReadOnly = &yes
 		}
+		if s.MySQL != nil && s.MySQL.RequireReadOnly == nil {
+			yes := true
+			s.MySQL.RequireReadOnly = &yes
+		}
 	}
 	for i := range c.Checks {
 		ch := &c.Checks[i]
@@ -539,16 +556,21 @@ func (c *Config) check() []error {
 func (s Source) check(name string) []error {
 	where := "sources." + name
 	set := 0
-	for _, p := range []bool{s.MongoDB != nil, s.Postgres != nil, s.ClickHouse != nil} {
+	for _, p := range []bool{s.MongoDB != nil, s.Postgres != nil, s.ClickHouse != nil, s.MySQL != nil} {
 		if p {
 			set++
 		}
 	}
 	switch {
 	case set == 0:
-		return []error{fmt.Errorf("%s: set mongodb, postgres or clickhouse", where)}
+		return []error{fmt.Errorf("%s: set mongodb, postgres, clickhouse or mysql", where)}
 	case set > 1:
-		return []error{fmt.Errorf("%s: set one of mongodb, postgres and clickhouse, not several", where)}
+		return []error{fmt.Errorf("%s: set one of mongodb, postgres, clickhouse and mysql, not several", where)}
+	case s.MySQL != nil:
+		if s.MySQL.DSNEnv == "" {
+			return []error{fmt.Errorf("%s.mysql.dsn_env: the name of the environment variable with the DSN", where)}
+		}
+		return nil
 	case s.ClickHouse != nil:
 		var errs []error
 		if s.ClickHouse.URLEnv == "" {
@@ -644,7 +666,7 @@ func (c *Config) checkQuery(ch Check, needID bool, add func(string, ...any)) {
 		add("source: unknown %q, known: %s", ch.Source, strings.Join(sortedKeys(c.Sources), ", "))
 	case src.MongoDB != nil:
 		if ch.Query != "" {
-			add("query is for postgres and clickhouse sources; %s is mongodb, use collection and pipeline", ch.Source)
+			add("query is for postgres, clickhouse and mysql sources; %s is mongodb, use collection and pipeline", ch.Source)
 		}
 		if ch.Collection == "" {
 			add("collection: required for a mongodb source")
@@ -681,6 +703,10 @@ func (c *Config) checkQuery(ch Check, needID bool, add func(string, ...any)) {
 			add("window: the query must compare a time column with {since:DateTime64(6, 'UTC')}, the start of the window")
 		case src.ClickHouse != nil && ch.Window == 0 && since:
 			add("query: {since:...} is the start of the window; set window")
+		case src.MySQL != nil && ch.Window > 0 && !mysqlVar("since").MatchString(ch.Query):
+			add("window: the query must compare a time column with @since, the start of the window")
+		case src.MySQL != nil && ch.Window == 0 && mysqlVar("since").MatchString(ch.Query):
+			add("query: @since is the start of the window; set window")
 		}
 		switch until := clickhouseParam("until").MatchString(ch.Query); {
 		case src.Postgres != nil && ch.Settle > 0 && (!strings.Contains(ch.Query, "$2") || !strings.Contains(ch.Query, "$1")):
@@ -692,6 +718,10 @@ func (c *Config) checkQuery(ch Check, needID bool, add func(string, ...any)) {
 			add("settle: the query must compare a time column with {until:DateTime64(6, 'UTC')}, the end of the rows that have settled")
 		case src.ClickHouse != nil && ch.Settle == 0 && until:
 			add("query: {until:...} is the end of the rows that have settled; set settle")
+		case src.MySQL != nil && ch.Settle > 0 && !mysqlVar("until").MatchString(ch.Query):
+			add("settle: the query must compare a time column with @until, the end of the rows that have settled")
+		case src.MySQL != nil && ch.Settle == 0 && mysqlVar("until").MatchString(ch.Query):
+			add("query: @until is the end of the rows that have settled; set settle")
 		}
 		if src.ClickHouse != nil {
 			for _, name := range []string{"since", "until"} {
@@ -836,6 +866,12 @@ func (c *Config) checkCompare(where string, ch Check) []error {
 // clickhouseParam finds a parameter, since or until, in a ClickHouse query.
 func clickhouseParam(name string) *regexp.Regexp {
 	return regexp.MustCompile(`\{\s*` + name + `\s*:`)
+}
+
+// mysqlVar finds a user variable, since or until, in a MySQL query. Names of
+// user variables are not case-sensitive.
+func mysqlVar(name string) *regexp.Regexp {
+	return regexp.MustCompile(`(?i)@` + name + `\b`)
 }
 
 // clickhouseParamType finds the types the query gives a parameter.
