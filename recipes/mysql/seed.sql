@@ -112,6 +112,32 @@ insert into refunds (id, payment_id, amount, created_at) values
     ('r6', 'p9',  10.00, '2026-10-02 11:20:00'),
     ('r7', 'p9',  20.00, '2026-10-02 11:30:00');
 
+-- Chargebacks come weeks after the payment.
+insert into orders (id, owner, amount, currency, created_at, fulfilled_at) values
+    ('o14', 'hugo',  50.00, 'USD', '2026-10-03 09:00:00', '2026-10-03 09:01:00'),
+    ('o15', 'ivan',  30.00, 'EUR', '2026-10-03 09:00:00', '2026-10-03 09:01:00'),
+    ('o16', 'judy',  40.00, 'USD', '2026-10-03 09:00:00', '2026-10-03 09:01:00');
+
+insert into payments (id, order_id, provider, provider_txn_id, status, amount, currency, created_at) values
+    ('p16', 'o14', 'acmepay', 'A-1009', 'succeeded',  50.00, 'USD', '2026-10-03 09:00:00'),
+    ('p17', 'o15', 'zenpay',  'Z-82',   'succeeded',  30.00, 'EUR', '2026-10-03 09:10:00'),
+    ('p18', 'o16', 'acmepay', 'A-1010', 'succeeded',  40.00, 'USD', '2026-10-03 09:20:00');
+
+insert into refunds (id, payment_id, amount, created_at) values
+    -- refund_and_chargeback: support refunded p16, and the customer's bank
+    -- charged it back as well
+    ('r9',  'p16', 50.00, '2026-10-05 10:00:00'),
+    -- p18's chargeback was won, so this refund is the only money that went back
+    ('r10', 'p18', 40.00, '2026-10-25 10:00:00');
+
+insert into chargebacks (id, payment_id, amount, status, created_at) values
+    ('cb1', 'p16', 50.00, 'lost', '2026-10-20 08:00:00'),
+    -- refund_and_chargeback: the provider reversed cb2, and the reversal was
+    -- written as a new chargeback instead of setting cb2 to won
+    ('cb2', 'p17', 30.00, 'lost', '2026-10-20 08:10:00'),
+    ('cb3', 'p17', 30.00, 'lost', '2026-10-24 08:10:00'),
+    ('cb4', 'p18', 40.00, 'won',  '2026-10-20 08:20:00');
+
 -- The lifecycle recipes look at age, so these rows are dated from now.
 insert into orders (id, owner, amount, currency, created_at, fulfilled_at) values
     ('o8',  'anna',  30.00, 'USD', now() - interval 3 hour,   null),

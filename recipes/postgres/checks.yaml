@@ -63,6 +63,16 @@ checks:
     show: [amount, refunded, refunds]
     expect: {query: select count(*) from refunds}
 
+  - name: refund_and_chargeback
+    description: A payment's refunds and the chargebacks not won add up to more than was paid.
+    source: app
+    window: 24h
+    query_file: refund_and_chargeback.sql
+    id: id
+    amount: {field: over, unit: major, currency_field: currency}
+    show: [amount, refunded, charged_back, chargebacks]
+    expect: {query: select count(*) from chargebacks}
+
   - name: currency_mismatch
     description: A successful payment is in another currency than its order.
     source: app

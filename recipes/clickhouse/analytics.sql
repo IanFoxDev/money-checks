@@ -30,7 +30,10 @@ insert into payments values
     ('p7',  'payment', 'acmepay',  10.00, 'EUR', '2026-10-02 09:41:00'),
     ('p8',  'payment', 'zenpay',   40.00, 'EUR', '2026-10-02 09:50:00'),
     ('t-1', 'payment', 'acmepay',    500, 'JPY', '2026-10-02 12:00:00'),
-    ('p5',  'refund',  'zenpay',   20.00, 'USD', '2026-10-02 10:50:00');
+    ('p5',  'refund',  'zenpay',   20.00, 'USD', '2026-10-02 10:50:00'),
+    ('p16', 'payment', 'acmepay',  50.00, 'USD', '2026-10-03 09:00:00'),
+    ('p17', 'payment', 'zenpay',   30.00, 'EUR', '2026-10-03 09:10:00'),
+    ('p18', 'payment', 'acmepay',  40.00, 'USD', '2026-10-03 09:20:00');
 
 -- duplicate_rows: the consumer crashed after the insert and before it committed
 -- its offset, so the batch with p3 came again.

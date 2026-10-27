@@ -60,6 +60,17 @@ create table refunds (
     foreign key (payment_id) references payments (id),
     index (created_at)
 );
+-- Chargebacks the provider opened on payments. A chargeback the merchant won is
+-- reversed: the money comes back and the status is 'won'.
+create table chargebacks (
+    id         varchar(64)    primary key,
+    payment_id varchar(64)    not null,
+    amount     decimal(20, 2) not null,
+    status     varchar(16)    not null,  -- open, lost, won
+    created_at timestamp      not null,
+    foreign key (payment_id) references payments (id),
+    index (created_at)
+);
 
 -- Subscriptions: access is paid for until current_period_end.
 create table subscriptions (

@@ -58,6 +58,17 @@ create table refunds (
 );
 create index on refunds (payment_id);
 create index on refunds (created_at);
+-- Chargebacks the provider opened on payments. A chargeback the merchant won is
+-- reversed: the money comes back and the status is 'won'.
+create table chargebacks (
+    id         text           primary key,
+    payment_id text           not null references payments,
+    amount     numeric(20, 2) not null,
+    status     text           not null,  -- open, lost, won
+    created_at timestamptz    not null
+);
+create index on chargebacks (payment_id);
+create index on chargebacks (created_at);
 
 -- Subscriptions: access is paid for until current_period_end.
 create table subscriptions (

@@ -1,0 +1,22 @@
+# Payments whose money went back twice: refunded by support and then charged
+# back by the customer's bank, or charged back twice because the provider's
+# reversal of a chargeback was written as a new one. The bank takes the
+# chargeback whatever the refund did. A chargeback the merchant won costs
+# nothing and does not count; payments refunded with no chargeback are left to
+# refund_exceeds_payment. A provider that reports chargebacks in its settlement
+# currency can be off by cents of exchange: compare with a tolerance then.
+# Refunds and chargebacks live in the payment, so the window picks payments
+# whose latest refund or chargeback is since $$since.
+- $match:
+    chargebacks.0: {$exists: true}
+    $expr: {$gte: [{$max: [{$max: "$chargebacks.created_at"}, {$max: "$refunds.created_at"}]}, "$$since"]}
+- $set:
+    lost: {$filter: {input: "$chargebacks", cond: {$ne: ["$$this.status", won]}}}
+- $set:
+    refunded: {$sum: "$refunds.amount"}
+    charged_back: {$sum: "$lost.amount"}
+    chargeback_count: {$size: "$lost"}
+- $match: {chargeback_count: {$gt: 0}, $expr: {$gt: [{$add: ["$refunded", "$charged_back"]}, "$amount"]}}
+- $set: {over: {$subtract: [{$add: ["$refunded", "$charged_back"]}, "$amount"]}}
+- $project: {refunds: 0, chargebacks: 0, lost: 0}
+- $sort: {_id: 1}

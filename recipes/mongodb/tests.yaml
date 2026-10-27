@@ -21,6 +21,10 @@ tests:
     violations:
       - {id: p8, amount: 40.00 EUR}
       - {id: p9, amount: 5.00 USD}
+  - check: refund_and_chargeback
+    violations:
+      - {id: p16, amount: 50.00 USD}
+      - {id: p17, amount: 30.00 EUR}
   - check: currency_mismatch
     violations:
       - {id: p7, amount: 10.00 EUR}

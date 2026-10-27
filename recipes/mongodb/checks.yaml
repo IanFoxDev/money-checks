@@ -66,6 +66,16 @@ checks:
     show: [amount, refunded, refund_count]
     expect: {pipeline: [{$match: {refunds.0: {$exists: true}}}, {$count: n}]}
 
+  - name: refund_and_chargeback
+    description: A payment's refunds and the chargebacks not won add up to more than was paid.
+    source: app
+    collection: payments
+    window: 24h
+    pipeline_file: refund_and_chargeback.yaml
+    amount: {field: over, unit: major, currency_field: currency}
+    show: [amount, refunded, charged_back, chargeback_count]
+    expect: {pipeline: [{$match: {chargebacks.0: {$exists: true}}}, {$count: n}]}
+
   - name: currency_mismatch
     description: A successful payment is in another currency than its order.
     source: app
