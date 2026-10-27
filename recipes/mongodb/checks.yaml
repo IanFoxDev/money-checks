@@ -76,6 +76,16 @@ checks:
     show: [amount, refunded, charged_back, chargeback_count]
     expect: {pipeline: [{$match: {chargebacks.0: {$exists: true}}}, {$count: n}]}
 
+  - name: refund_on_wrong_charge
+    description: A refund is linked to another payment than the charge the provider refunded.
+    source: app
+    collection: payments
+    window: 24h
+    pipeline_file: refund_on_wrong_charge.yaml
+    amount: {field: amount, unit: major, currency_field: currency}
+    show: [payment_id, linked_txn, refunded_txn, refunded_payment]
+    expect: {pipeline: [{$match: {refunds.provider_txn_id: {$exists: true}}}, {$count: n}]}
+
   - name: currency_mismatch
     description: A successful payment is in another currency than its order.
     source: app

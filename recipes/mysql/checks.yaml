@@ -73,6 +73,16 @@ checks:
     show: [amount, refunded, charged_back, chargebacks]
     expect: {query: select count(*) from chargebacks}
 
+  - name: refund_on_wrong_charge
+    description: A refund is linked to another payment than the charge the provider refunded.
+    source: app
+    window: 24h
+    query_file: refund_on_wrong_charge.sql
+    id: id
+    amount: {field: amount, unit: major, currency_field: currency}
+    show: [payment_id, linked_txn, refunded_txn, refunded_payment]
+    expect: {query: select count(*) from refunds where provider_txn_id is not null}
+
   - name: currency_mismatch
     description: A successful payment is in another currency than its order.
     source: app

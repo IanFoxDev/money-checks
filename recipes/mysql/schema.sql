@@ -53,10 +53,13 @@ create table payments (
     index (status, created_at)
 );
 create table refunds (
-    id         varchar(64)    primary key,
-    payment_id varchar(64)    not null,
-    amount     decimal(20, 2) not null,
-    created_at timestamp      not null,
+    id              varchar(64)    primary key,
+    payment_id      varchar(64)    not null,
+    amount          decimal(20, 2) not null,
+    -- The provider's id of the charge it refunded, as its webhook named it;
+    -- null for refunds made in the app.
+    provider_txn_id varchar(128),
+    created_at      timestamp      not null,
     foreign key (payment_id) references payments (id),
     index (created_at)
 );

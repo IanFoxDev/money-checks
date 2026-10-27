@@ -14,5 +14,8 @@
   {"_id": "o13", "owner": "frank", "amount": {"$numberDecimal": "20.00"}, "currency": "USD", "created_at": "now-2h"},
   {"_id": "o14", "owner": "hugo", "amount": {"$numberDecimal": "50.00"}, "currency": "USD", "created_at": {"$date": "2026-10-03T09:00:00Z"}, "fulfilled_at": {"$date": "2026-10-03T09:01:00Z"}},
   {"_id": "o15", "owner": "ivan", "amount": {"$numberDecimal": "30.00"}, "currency": "EUR", "created_at": {"$date": "2026-10-03T09:00:00Z"}, "fulfilled_at": {"$date": "2026-10-03T09:01:00Z"}},
-  {"_id": "o16", "owner": "judy", "amount": {"$numberDecimal": "40.00"}, "currency": "USD", "created_at": {"$date": "2026-10-03T09:00:00Z"}, "fulfilled_at": {"$date": "2026-10-03T09:01:00Z"}}
+  {"_id": "o16", "owner": "judy", "amount": {"$numberDecimal": "40.00"}, "currency": "USD", "created_at": {"$date": "2026-10-03T09:00:00Z"}, "fulfilled_at": {"$date": "2026-10-03T09:01:00Z"}},
+  {"_id": "o17", "owner": "anna", "amount": {"$numberDecimal": "9.99"}, "currency": "USD", "created_at": {"$date": "2026-08-04T07:00:00Z"}, "fulfilled_at": {"$date": "2026-08-04T07:01:00Z"}},
+  {"_id": "o18", "owner": "anna", "amount": {"$numberDecimal": "9.99"}, "currency": "USD", "created_at": {"$date": "2026-09-04T07:00:00Z"}, "fulfilled_at": {"$date": "2026-09-04T07:01:00Z"}},
+  {"_id": "o19", "owner": "anna", "amount": {"$numberDecimal": "9.99"}, "currency": "USD", "created_at": {"$date": "2026-10-04T07:00:00Z"}, "fulfilled_at": {"$date": "2026-10-04T07:01:00Z"}}
 ]

@@ -51,10 +51,13 @@ create index on payments (created_at);
 -- Pending payments are few; the index keeps finding them cheap.
 create index on payments (created_at) where status = 'pending';
 create table refunds (
-    id         text           primary key,
-    payment_id text           not null references payments,
-    amount     numeric(20, 2) not null,
-    created_at timestamptz    not null
+    id              text           primary key,
+    payment_id      text           not null references payments,
+    amount          numeric(20, 2) not null,
+    -- The provider's id of the charge it refunded, as its webhook named it;
+    -- null for refunds made in the app.
+    provider_txn_id text,
+    created_at      timestamptz    not null
 );
 create index on refunds (payment_id);
 create index on refunds (created_at);

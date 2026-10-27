@@ -138,6 +138,24 @@ insert into chargebacks (id, payment_id, amount, status, created_at) values
     ('cb3', 'p17', 30.00, 'lost', '2026-10-24 08:10:00'),
     ('cb4', 'p18', 40.00, 'won',  '2026-10-20 08:20:00');
 
+-- A subscription charged monthly at acmepay: p19 first, then two renewals.
+insert into orders (id, owner, amount, currency, created_at, fulfilled_at) values
+    ('o17', 'anna',   9.99, 'USD', '2026-08-04 07:00:00', '2026-08-04 07:01:00'),
+    ('o18', 'anna',   9.99, 'USD', '2026-09-04 07:00:00', '2026-09-04 07:01:00'),
+    ('o19', 'anna',   9.99, 'USD', '2026-10-04 07:00:00', '2026-10-04 07:01:00');
+
+insert into payments (id, order_id, provider, provider_txn_id, status, amount, currency, created_at) values
+    ('p19', 'o17', 'acmepay', 'A-1011', 'succeeded',   9.99, 'USD', '2026-08-04 07:00:00'),
+    ('p20', 'o18', 'acmepay', 'A-1012', 'succeeded',   9.99, 'USD', '2026-09-04 07:00:00'),
+    ('p21', 'o19', 'acmepay', 'A-1013', 'succeeded',   9.99, 'USD', '2026-10-04 07:00:00');
+
+insert into refunds (id, payment_id, amount, provider_txn_id, created_at) values
+    -- refund_on_wrong_charge: acmepay refunded the October renewal A-1013, and
+    -- the app took the subscription's first payment
+    ('r11', 'p19',  9.99, 'A-1013', '2026-10-06 12:00:00'),
+    -- the September renewal, refunded and linked to its own payment
+    ('r12', 'p20',  9.99, 'A-1012', '2026-09-10 12:00:00');
+
 -- The lifecycle recipes look at age, so these rows are dated from now.
 insert into orders (id, owner, amount, currency, created_at, fulfilled_at) values
     ('o8',  'anna',  30.00, 'USD', now() - interval 3 hour,   null),

@@ -1,0 +1,33 @@
+# Refunds written against another charge than the one the provider refunded.
+# A subscription renewal is refunded at the provider, the webhook names that
+# charge, and the app looks the payment up by subscription and takes the first
+# one. The refunded renewal still counts as paid in revenue and partner
+# shares, and the first charge looks refunded. refund_exceeds_payment notices
+# only when the first charge collects more refunds than it was worth.
+# refunded_payment is the payment the provider meant, when the app has it.
+- $match: {refunds.provider_txn_id: {$exists: true}}
+- $unwind: "$refunds"
+- $match:
+    refunds.provider_txn_id: {$ne: null}
+    $expr:
+      $and:
+        - {$gte: ["$refunds.created_at", "$$since"]}
+        - {$ne: ["$refunds.provider_txn_id", "$provider_txn_id"]}
+- $lookup:
+    from: payments
+    let: {provider: "$provider", txn: "$refunds.provider_txn_id"}
+    pipeline:
+      - $match: {$expr: {$and: [{$eq: ["$provider", "$$provider"]}, {$eq: ["$provider_txn_id", "$$txn"]}]}}
+      - $sort: {_id: 1}
+      - $limit: 1
+      - $project: {_id: 1}
+    as: meant
+- $project:
+    _id: "$refunds._id"
+    currency: 1
+    amount: "$refunds.amount"
+    payment_id: "$_id"
+    linked_txn: "$provider_txn_id"
+    refunded_txn: "$refunds.provider_txn_id"
+    refunded_payment: {$first: "$meant._id"}
+- $sort: {_id: 1}
