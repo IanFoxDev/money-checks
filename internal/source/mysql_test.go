@@ -274,18 +274,30 @@ func TestMySQLWindow(t *testing.T) {
 	}
 }
 
+// The check's deadline ends a slow query with an error. SLEEP stopped by
+// max_execution_time would return 1 and no error, so the server limit must
+// not come first.
 func TestMySQLTimeout(t *testing.T) {
 	newMySQL(t)
 	src := openMySQLEnv(t, "MC_MYSQL_READ", true)
-	ch := pgCheck("SELECT BENCHMARK(10000000000, SHA2('x', 256)) AS b")
-	ch.Timeout = 500 * time.Millisecond
-	start := time.Now()
-	_, err := collect(t, src, ch)
-	if err == nil {
-		t.Fatal("a slow query ran to the end")
+	for _, q := range []string{
+		"SELECT SLEEP(5) AS s",
+		"SELECT count(*) AS n FROM information_schema.columns a, information_schema.columns b, information_schema.columns c",
+	} {
+		ch := pgCheck(q)
+		ch.Timeout = 500 * time.Millisecond
+		start := time.Now()
+		rows, err := collect(t, src, ch)
+		if !errors.Is(err, context.DeadlineExceeded) || Unreachable(err) {
+			t.Errorf("%s: want the deadline, got %v and %d rows", q, err, len(rows))
+		}
+		if d := time.Since(start); d > 3*time.Second {
+			t.Errorf("%s: stopped after %s", q, d)
+		}
 	}
-	if d := time.Since(start); d > 3*time.Second {
-		t.Errorf("stopped after %s", d)
+	// The connection the deadline closed is not reused.
+	if _, err := collect(t, src, pgCheck("SELECT 1 AS one")); err != nil {
+		t.Errorf("next check: %v", err)
 	}
 }
 

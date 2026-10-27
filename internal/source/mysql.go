@@ -169,9 +169,15 @@ var mysqlMinTime = time.Date(1000, 1, 1, 0, 0, 0, 0, time.UTC)
 // mysqlTimeFormat is how since and until are sent, to CAST(? AS DATETIME(6)).
 const mysqlTimeFormat = "2006-01-02 15:04:05.000000"
 
-// Query takes a connection, makes its session read-only, in UTC and with the
-// check's timeout as max_execution_time, sets @since and @until, and runs the
-// query on it. The session is set again before every check, so nothing a check
+// mysqlGrace is how much longer than the check's timeout the server lets a
+// query run. The check's own deadline decides: SLEEP and BENCHMARK stopped by
+// max_execution_time return a value, not an error. The server limit stops a
+// query the client has given up on.
+const mysqlGrace = time.Second
+
+// Query takes a connection, makes its session read-only, in UTC and with
+// max_execution_time just over the check's timeout, sets @since and @until, and
+// runs the query on it. The session is set again before every check, so nothing a check
 // did to it carries over. Values come back as text; NULL is nil.
 func (m *mysqlSource) Query(ctx context.Context, ch config.Check, since, until time.Time, each func(Row) error) error {
 	ctx, cancel := context.WithTimeout(ctx, ch.Timeout)
@@ -196,7 +202,7 @@ func (m *mysqlSource) Query(ctx context.Context, ch config.Check, since, until t
 	}
 	if _, err := conn.ExecContext(ctx, "SET SESSION transaction_read_only = ON, max_execution_time = ?, time_zone = '+00:00', "+
 		"@since = CAST(? AS DATETIME(6)), @until = CAST(? AS DATETIME(6))",
-		int64(math.Ceil(float64(ch.Timeout)/float64(time.Millisecond))), sinceArg, untilArg); err != nil {
+		int64(math.Ceil(float64(ch.Timeout+mysqlGrace)/float64(time.Millisecond))), sinceArg, untilArg); err != nil {
 		return err
 	}
 	// Without arguments the driver sends the query as text, and every value

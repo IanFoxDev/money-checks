@@ -29,8 +29,10 @@ database:
 Two more things were checked on the same server:
 
 - `max_execution_time` can be set by any user for the session, and a SELECT that
-  runs longer fails with error 3024. It applies to SELECT only, which is all a check
-  may run under a read-only session anyway.
+  reads a table for longer fails with error 3024. It applies to SELECT only, which
+  is all a check may run under a read-only session anyway. A SELECT of `SLEEP()` or
+  `BENCHMARK()` alone is different: stopped by the limit, it returns 1 or 0 and no
+  error, so a run would read it as a check that finished.
 - A `TIMESTAMP` column compared with a `DATETIME` value reads the value in the
   session's time zone. With the session at `+03:00` and the window starting at
   12:00 UTC, a row written at 10:00 UTC was inside the window. With the session at
@@ -46,9 +48,13 @@ parameters part of the configuration.
 The source takes a connection from the pool and sends, in one statement:
 
 ```sql
-SET SESSION transaction_read_only = ON, max_execution_time = <timeout in ms>,
+SET SESSION transaction_read_only = ON, max_execution_time = <timeout + 1s in ms>,
     time_zone = '+00:00'
 ```
+
+The check's own deadline ends a slow query, with an error, whatever the query is.
+`max_execution_time` is one second longer and stops a query the client has
+already given up on, so it does not keep running on the server.
 
 then the window values, then the query, all on that connection. The session is set
 again before every check, so whatever the previous check did to it does not carry
