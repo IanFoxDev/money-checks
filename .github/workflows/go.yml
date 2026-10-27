@@ -45,12 +45,23 @@ jobs:
           --health-interval 2s
           --health-timeout 5s
           --health-retries 30
+      mysql:
+        image: mysql:8.4
+        env:
+          MYSQL_ROOT_PASSWORD: root
+        ports: ["3306:3306"]
+        options: >-
+          --health-cmd "mysqladmin ping -h 127.0.0.1 -uroot -proot"
+          --health-interval 2s
+          --health-timeout 5s
+          --health-retries 30
     env:
       # Database tests fail instead of skipping when a service is missing.
       MONEY_CHECKS_REQUIRE_DB: "1"
       MONEY_CHECKS_TEST_PG_DSN: postgres://checks:checks@127.0.0.1:5432/checks
       MONEY_CHECKS_TEST_MONGO_URI: mongodb://root:root@127.0.0.1:27017/?authSource=admin
       MONEY_CHECKS_TEST_CLICKHOUSE_URL: http://checks:checks@127.0.0.1:8123/
+      MONEY_CHECKS_TEST_MYSQL_DSN: root:root@tcp(127.0.0.1:3306)/
     steps:
       - uses: actions/checkout@v7
       - uses: actions/setup-go@v7
