@@ -361,7 +361,8 @@ Slack messages carry no rows at all.
 [recipes](recipes) has checks for the invariants most payment, wallet and
 subscription systems share, ready to copy: a negative balance, a ledger
 transaction that does not sum to zero, one provider transaction recorded as two
-payments, refunds over the payment, a payment stuck in pending, an order paid and
+payments, refunds over the payment, a refund and a chargeback on one payment, a
+payment stuck in pending, an order paid and
 never fulfilled, daily totals that differ between the app and ClickHouse, and
 more. Each comes for PostgreSQL, MySQL and MongoDB, or ClickHouse, with rows that break it,
 rows next to them that must not, and a test in CI.
@@ -381,7 +382,7 @@ The full configuration: [docs/config.md](docs/config.md).
 
 ## Not yet
 
-MySQL sources, a history of violations, and an MCP mode so an assistant can run the same named queries. If you need one of these
+A history of violations and an MCP mode so an assistant can run the same named queries. If you need one of these
 first, open an issue.
 
 ## Contributing

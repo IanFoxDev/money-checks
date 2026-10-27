@@ -8,6 +8,15 @@ configuration, the report format or the metric names; such changes are marked
 
 ## [Unreleased]
 
+### Added
+
+- Two recipes for refunds and chargebacks, for PostgreSQL, MySQL and MongoDB.
+  `refund_and_chargeback`: a payment refunded and charged back, or charged back
+  twice because the reversal of a chargeback was written as a new one; a
+  chargeback the merchant won does not count. `refund_on_wrong_charge`: a refund
+  linked to another payment than the charge the provider named, such as the
+  first charge of a subscription instead of the renewal it refunded.
+
 ## [0.7.0] - 2026-10-27
 
 ### Added
