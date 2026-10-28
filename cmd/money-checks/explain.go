@@ -46,10 +46,8 @@ func explainChecks(ctx context.Context, args []string, stdout, stderr io.Writer,
 		scope = check.Window
 	}
 	r := check.Explain(ctx, cfg, scope, open, now, *analyze)
+	// The warnings are in the text on stdout, so not on stderr as well.
 	r.Warnings = append(r.Warnings, cfg.Warnings...)
-	for _, w := range r.Warnings {
-		fmt.Fprintln(stderr, "warning:", w)
-	}
 	if err := report.ExplainText(stdout, r, *maxRows); err != nil {
 		fmt.Fprintln(stderr, err)
 		return exitError

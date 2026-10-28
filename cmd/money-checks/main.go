@@ -142,8 +142,11 @@ func runChecks(ctx context.Context, args []string, stdout, stderr io.Writer, ope
 	if names := cfg.WithoutExpect(); len(names) > 0 {
 		r.Warnings = append(r.Warnings, check.WithoutExpectWarning(names))
 	}
-	for _, w := range r.Warnings {
-		fmt.Fprintln(stderr, "warning:", w)
+	// A report on stdout carries the warnings already.
+	if *mdPath != "" {
+		for _, w := range r.Warnings {
+			fmt.Fprintln(stderr, "warning:", w)
+		}
 	}
 	if *mdPath == "" {
 		if err := report.Markdown(stdout, r); err != nil {

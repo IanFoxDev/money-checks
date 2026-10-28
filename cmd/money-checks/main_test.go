@@ -75,9 +75,16 @@ checks:
 		t.Errorf("stdout %q\nstderr %q", out, errOut)
 	}
 	// The check has no expect, so the report says it cannot tell no data from no violations.
+	// The report is on stdout, so the warning is not on stderr as well.
 	const warn = "checks without expect, which cannot tell no violations from no data: refund_twice"
-	if !strings.Contains(out, "Warning: "+warn) || !strings.Contains(errOut, "warning: "+warn) {
+	if !strings.Contains(out, "Warning: "+warn) || strings.Contains(errOut, warn) {
 		t.Errorf("stdout %q\nstderr %q", out, errOut)
+	}
+	// With the report in a file, the warning goes to stderr.
+	mdPath := filepath.Join(t.TempDir(), "r.md")
+	_, out, errOut = runCLI(t, "run", "-c", path, "--markdown", mdPath)
+	if md, err := os.ReadFile(mdPath); err != nil || !strings.Contains(string(md), "Warning: "+warn) || out != "" || !strings.Contains(errOut, "warning: "+warn) {
+		t.Errorf("markdown %s, %v\nstdout %q\nstderr %q", md, err, out, errOut)
 	}
 	var r struct {
 		Summary struct{ Failed int }
