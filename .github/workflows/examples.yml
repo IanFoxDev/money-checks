@@ -147,3 +147,19 @@ jobs:
         run: docker compose run --rm money-checks test -c /recipes/clickhouse/checks.yaml -t /recipes/clickhouse/tests.yaml
       - name: MySQL recipes find exactly the planted violations
         run: docker compose run --rm money-checks test -c /recipes/mysql/checks.yaml -t /recipes/mysql/tests.yaml
+      - name: Every recipe query has a plan, with the window and run
+        run: |
+          for db in postgres mongodb clickhouse mysql; do
+            for flag in --window --analyze; do
+              docker compose run --rm -T money-checks explain -c /recipes/$db/checks.yaml $flag > out.txt
+              tail -n 1 out.txt
+              grep -q ' 0 failed\.$' out.txt
+            done
+          done
+          # With its window the MySQL recipe reads refunds by the date, and names
+          # the table, not its alias. Its expect counts the whole table.
+          docker compose run --rm -T money-checks explain -c /recipes/mysql/checks.yaml --window --check refund_exceeds_payment > out.txt
+          cat out.txt
+          sed -n '/^refund_exceeds_payment (/,/^$/p' out.txt > query.txt
+          grep -qx '  index: created_at on refunds' query.txt
+          if grep -q 'full scan' query.txt; then exit 1; fi
