@@ -10,6 +10,17 @@ configuration, the report format or the metric names; such changes are marked
 
 ### Added
 
+- `money-checks explain`: the plan of every query of a configuration, the
+  `expect` queries and both sides of a `compare` check included, from all four
+  sources. For each it prints the tables read in full, the indexes and the rows,
+  and what it could not check, such as a MongoDB `$lookup` stage outside the query
+  plan. Nothing runs unless `--analyze`, which runs the queries with the
+  read-only session and timeout of `run`. `--window` gives the parameters `serve`
+  gives between full passes. Exit code 1 with `--max-rows N` when a plan reads
+  more than N rows, 2 when a plan could not be had. The plans themselves go only
+  to the `--json` file, because a MySQL plan can hold the values of a row. On
+  ClickHouse it keeps the subqueries of `IN (SELECT ...)` from running while
+  planning. See `docs/adr/0009-explain.md`.
 - Two recipes for refunds and chargebacks, for PostgreSQL, MySQL and MongoDB.
   `refund_and_chargeback`: a payment refunded and charged back, or charged back
   twice because the reversal of a chargeback was written as a new one; a

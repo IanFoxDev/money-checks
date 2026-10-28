@@ -434,7 +434,9 @@ number is below `min`:
   `defaults.require_expect: true` makes a check without it a configuration error; a
   compare check then needs `expect` on at least one side.
 
-Keep it cheap: a count over an indexed range, not a second scan of the table. Why it
+Keep it cheap: a count over an indexed range, not a second scan of the table.
+`count(*)` over a whole table reads it, or a whole index, on every run; `explain`
+lists the `expect` queries with the others, so it shows. Why it
 works this way: [adr/0005-expect-and-test.md](adr/0005-expect-and-test.md).
 
 ## serve
@@ -572,6 +574,8 @@ entries for you after a first run, see below.
 ```
 money-checks run -c checks.yaml [--window] [--markdown file] [--json file]
                  [--check NAME [--csv file] [--jsonl file]]
+money-checks explain -c checks.yaml [--window] [--check NAME] [--analyze]
+                     [--json file] [--max-rows N]
 money-checks serve -c checks.yaml
 money-checks known add -c checks.yaml --check NAME --reason TEXT [--until DATE] [--limit N]
 money-checks test -c checks.yaml -t tests.yaml
@@ -601,6 +605,48 @@ fix is made from.
   fails leaves no file. The files are readable by their owner only.
 - `--csv` and `--jsonl` without `--check` are an error: the list is for one thing to
   do, and the columns differ from check to check.
+
+`explain` asks each source for the plan of every query: the query of each check,
+its `expect`, and both sides of a `compare` check with their `expect`. It takes
+`--window` and `--check` as `run` does, with the same parameters: with `--window` a
+check with a window gets its start, and a compare side gets the end of `settle`.
+Nothing runs unless `--analyze` is given. For each query it prints the tables and
+collections read in full, the indexes used and the rows, then the notes:
+
+| Source | without `--analyze` | with `--analyze` |
+|---|---|---|
+| postgres | `EXPLAIN (VERBOSE, FORMAT JSON)`; rows estimated, a full scan counted by the rows of the table | `EXPLAIN (ANALYZE, BUFFERS, ...)`; rows read |
+| mysql | `EXPLAIN FORMAT=JSON`; rows estimated | `EXPLAIN ANALYZE`; rows read |
+| mongodb | `explain` with `queryPlanner`; no rows | `explain` with `executionStats`; documents examined |
+| clickhouse | `EXPLAIN json = 1, indexes = 1` and `EXPLAIN ESTIMATE`; rows estimated | the same, with the subqueries of `IN` run |
+
+- A full scan is a table, collection or whole index read from start to end: Seq
+  Scan, MySQL access type `ALL` or `index`, `COLLSCAN`, a `$lookup` that reads the
+  other collection in full, a MergeTree table where no key leaves out a granule. A
+  table read once per row of another counts its rows that many times.
+- PostgreSQL: a table that was never analyzed gets a note that the estimates are
+  guesses.
+- MySQL: tables are named by their name, not their alias, from 8.3; on 8.0 the
+  aliases stay. A plan that took as long as the check's timeout is reported as
+  stopped by it: `EXPLAIN ANALYZE` then returns the part that ran, without an
+  error.
+- MongoDB: the timeout goes on the `explain` command as `maxTimeMS`. A `$lookup`
+  stage outside the query plan gets the note "not checked" without `--analyze`;
+  with it the stage reports the collection scans and indexes it used. A
+  `$graphLookup` gets the note either way: explain does not say how it reads.
+  `--max-rows` does not apply to a plan without rows.
+- ClickHouse: to choose the parts to read, ClickHouse runs the subqueries of
+  `IN (SELECT ...)` while it plans. Without `--analyze` money-checks turns that off
+  (`use_index_for_in_with_subqueries = 0`) and says so in a note; a user whose
+  profile sets `readonly=1` cannot, and the note says the subqueries ran without a
+  time limit. The rows are always the estimate.
+- The output never holds the plan: MySQL puts the values of a row it read while
+  planning into it. `--json` writes the summaries and the plans as the databases
+  return them, readable by the owner only, as the files of `run --csv`.
+
+Exit code 0 when every plan was received, 1 with `--max-rows N` when a plan reads
+more than N rows, 2 when a plan could not be had or the timeout stopped its query.
+Why: [adr/0009-explain.md](adr/0009-explain.md).
 
 `known add` runs one check and appends every new violation it finds to the known
 file: one entry per row, with the reason, the amount and `until` when given. It runs
@@ -716,3 +762,39 @@ minus left, and its `fields` are both sides and the `problem`. With `settle` it 
 `until`, the end of the rows both sides read, and `settle`. `expect` has what the
 expect query found and its `min`; a compare check has one entry per side that has
 an expect, with `side` `left` or `right`.
+
+## The explain JSON
+
+`explain --json` writes, for each query:
+
+```json
+{
+  "version": 1,
+  "started_at": "2026-10-28T12:00:00Z",
+  "analyze": false,
+  "warnings": [],
+  "queries": [
+    {
+      "check": "refund_exceeds_payment",
+      "query": "",
+      "source": "app",
+      "scope": "window",
+      "since": "2026-10-27T12:00:00Z",
+      "scans": [],
+      "indexes": ["created_at on refunds", "PRIMARY on payments"],
+      "rows": 3,
+      "analyzed": false,
+      "stopped": false,
+      "notes": [],
+      "plan": "{\"query_block\": ...}"
+    }
+  ]
+}
+```
+
+`query` is empty for the query of the check, or `expect`, `left`, `right`, `left
+expect`, `right expect`. `rows` is -1 when the source gives no estimate or the plan
+could not be had; then `error` has the reason. `analyzed` is true when the rows are
+rows read, `stopped` when the timeout stopped the query. `plan` is the plan as the
+database returned it, as a string: JSON, or the text of MySQL `EXPLAIN ANALYZE`.
+Lists are never null.
