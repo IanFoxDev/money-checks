@@ -182,29 +182,11 @@ const mysqlGrace = time.Second
 func (m *mysqlSource) Query(ctx context.Context, ch config.Check, since, until time.Time, each func(Row) error) error {
 	ctx, cancel := context.WithTimeout(ctx, ch.Timeout)
 	defer cancel()
-	conn, err := m.db.Conn(ctx)
+	conn, err := m.session(ctx, ch, since, until, ch.Timeout+mysqlGrace)
 	if err != nil {
 		return err
 	}
 	defer func() { _ = conn.Close() }()
-	// Parameters, never text in the query. A variable the check does not use
-	// is NULL, not what the previous check left in it.
-	var sinceArg, untilArg any
-	if ch.Window > 0 {
-		since = since.UTC()
-		if since.Before(mysqlMinTime) {
-			since = mysqlMinTime
-		}
-		sinceArg = since.Format(mysqlTimeFormat)
-	}
-	if ch.Settle > 0 {
-		untilArg = until.UTC().Format(mysqlTimeFormat)
-	}
-	if _, err := conn.ExecContext(ctx, "SET SESSION transaction_read_only = ON, max_execution_time = ?, time_zone = '+00:00', "+
-		"@since = CAST(? AS DATETIME(6)), @until = CAST(? AS DATETIME(6))",
-		int64(math.Ceil(float64(ch.Timeout+mysqlGrace)/float64(time.Millisecond))), sinceArg, untilArg); err != nil {
-		return err
-	}
 	// Without arguments the driver sends the query as text, and every value
 	// comes back as text.
 	rows, err := conn.QueryContext(ctx, ch.Query)
@@ -236,6 +218,35 @@ func (m *mysqlSource) Query(ctx context.Context, ch config.Check, since, until t
 		}
 	}
 	return rows.Err()
+}
+
+// session takes a connection and sets its session for a check: read-only, in
+// UTC, with limit as max_execution_time, and @since and @until.
+func (m *mysqlSource) session(ctx context.Context, ch config.Check, since, until time.Time, limit time.Duration) (*sql.Conn, error) {
+	conn, err := m.db.Conn(ctx)
+	if err != nil {
+		return nil, err
+	}
+	// Parameters, never text in the query. A variable the check does not use
+	// is NULL, not what the previous check left in it.
+	var sinceArg, untilArg any
+	if ch.Window > 0 {
+		since = since.UTC()
+		if since.Before(mysqlMinTime) {
+			since = mysqlMinTime
+		}
+		sinceArg = since.Format(mysqlTimeFormat)
+	}
+	if ch.Settle > 0 {
+		untilArg = until.UTC().Format(mysqlTimeFormat)
+	}
+	if _, err := conn.ExecContext(ctx, "SET SESSION transaction_read_only = ON, max_execution_time = ?, time_zone = '+00:00', "+
+		"@since = CAST(? AS DATETIME(6)), @until = CAST(? AS DATETIME(6))",
+		int64(math.Ceil(float64(limit)/float64(time.Millisecond))), sinceArg, untilArg); err != nil {
+		_ = conn.Close()
+		return nil, err
+	}
+	return conn, nil
 }
 
 func (m *mysqlSource) Close(context.Context) error {
