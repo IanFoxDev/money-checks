@@ -1,0 +1,92 @@
+{
+  "version": 1,
+  "started_at": "2026-10-28T12:00:00Z",
+  "analyze": false,
+  "warnings": [
+    "source billing: postgres: the user can write to charges; running anyway because require_read_only is false"
+  ],
+  "queries": [
+    {
+      "check": "rebills",
+      "query": "expect",
+      "source": "billing",
+      "scope": "window",
+      "since": "2026-10-27T12:00:00Z",
+      "scans": [],
+      "indexes": [
+        "charges_created_at_idx on charges"
+      ],
+      "rows": 61,
+      "analyzed": false,
+      "stopped": false,
+      "notes": [],
+      "plan": "[{\"Plan\": {}}]"
+    },
+    {
+      "check": "rebills",
+      "query": "",
+      "source": "billing",
+      "scope": "window",
+      "since": "2026-10-27T12:00:00Z",
+      "scans": [],
+      "indexes": [
+        "charges_created_at_idx on charges"
+      ],
+      "rows": 61,
+      "analyzed": false,
+      "stopped": false,
+      "notes": [],
+      "plan": "[{\"Plan\": {}}]"
+    },
+    {
+      "check": "stuck",
+      "query": "",
+      "source": "billing",
+      "scope": "full",
+      "scans": [
+        "payments"
+      ],
+      "indexes": [],
+      "rows": 120000,
+      "analyzed": false,
+      "stopped": false,
+      "notes": [
+        "payments has no statistics: the estimates are a guess; run ANALYZE payments"
+      ],
+      "plan": "[{\"Plan\": {}}]"
+    },
+    {
+      "check": "daily",
+      "query": "left",
+      "source": "shop",
+      "scope": "window",
+      "since": "2026-10-25T12:00:00Z",
+      "until": "2026-10-28T10:00:00Z",
+      "scans": [],
+      "indexes": [
+        "day_1 on totals"
+      ],
+      "rows": -1,
+      "analyzed": false,
+      "stopped": false,
+      "notes": [],
+      "plan": "{\"queryPlanner\": {}}"
+    },
+    {
+      "check": "daily",
+      "query": "right",
+      "source": "stats",
+      "scope": "window",
+      "since": "2026-10-25T12:00:00Z",
+      "until": "2026-10-28T10:00:00Z",
+      "error": "source stats: connection refused",
+      "scans": [],
+      "indexes": [],
+      "rows": -1,
+      "analyzed": false,
+      "stopped": false,
+      "notes": [],
+      "plan": ""
+    }
+  ]
+}

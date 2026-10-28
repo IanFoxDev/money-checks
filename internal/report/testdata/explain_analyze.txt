@@ -1,0 +1,9 @@
+money-checks explain at 2026-10-28 12:00:00 UTC, with --analyze, the queries ran.
+
+stuck (source billing, all rows)
+  stopped by the timeout: the plan is of the part that ran
+  full scan: payments
+  rows read: 120000
+  note: payments has no statistics: the estimates are a guess; run ANALYZE payments
+
+1 query: 1 read a table in full, 1 failed.

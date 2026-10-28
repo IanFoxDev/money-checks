@@ -76,6 +76,34 @@ func TestEndToEndExample(t *testing.T) {
 	if code != exitOK || !strings.Contains(out, "9 tests: 9 passed") {
 		t.Errorf("test: exit %d\n%s\n%s", code, out, errOut)
 	}
+
+	// Every query of the three databases has a plan, with the window and with
+	// the queries run. The plans go to the JSON file only.
+	for _, args := range [][]string{{"--window"}, {"--analyze"}} {
+		planPath := filepath.Join(dir, "plans.json")
+		code, out, errOut = runCLI(t, append([]string{"explain", "-c", path, "--json", planPath}, args...)...)
+		if code != exitOK || !strings.Contains(out, "20 queries:") || !strings.Contains(out, " 0 failed.") {
+			t.Errorf("explain %v: exit %d\n%s\n%s", args, code, out, errOut)
+		}
+		if strings.Contains(out, "Plan") || strings.Contains(out, "queryPlanner") {
+			t.Errorf("explain %v: a plan in the text output\n%s", args, out)
+		}
+		var plans struct {
+			Queries []struct{ Plan string }
+		}
+		b, err := os.ReadFile(planPath)
+		if err != nil || json.Unmarshal(b, &plans) != nil || len(plans.Queries) != 20 {
+			t.Fatalf("explain %v: %v\n%s", args, err, b)
+		}
+		for i, q := range plans.Queries {
+			if q.Plan == "" {
+				t.Errorf("explain %v: query %d has no plan", args, i)
+			}
+		}
+		if fi, err := os.Stat(planPath); err != nil || fi.Mode().Perm() != 0o600 {
+			t.Errorf("explain %v: %v, mode %v", args, err, fi.Mode())
+		}
+	}
 }
 
 // seedMongo loads the example's Extended JSON files into database name and returns

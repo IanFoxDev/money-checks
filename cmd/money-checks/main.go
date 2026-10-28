@@ -36,6 +36,12 @@ const usage = `usage:
       run every check once; the Markdown report goes to stdout unless a file is given;
       with --window, checks that have a window read only its rows; with --check, only
       that check, and --csv or --jsonl write every one of its violations
+  money-checks explain -c checks.yaml [--window] [--check NAME] [--analyze]
+                       [--json file] [--max-rows N]
+      ask the databases for the plan of every query and print what it reads in full,
+      the indexes and the rows; nothing runs unless --analyze; the plans themselves go
+      only to the --json file; 0 every plan received, 1 one reads more than --max-rows,
+      2 a plan could not be received or the timeout stopped its query
   money-checks serve -c checks.yaml
       run the checks now and every serve.interval; /metrics, /healthz, /readyz on serve.listen
   money-checks known add -c checks.yaml --check NAME --reason TEXT [--until DATE] [--limit N]
@@ -65,6 +71,8 @@ func run(ctx context.Context, args []string, stdout, stderr io.Writer, open chec
 		return exitOK
 	case "run":
 		return runChecks(ctx, args[1:], stdout, stderr, open, now)
+	case "explain":
+		return explainChecks(ctx, args[1:], stdout, stderr, open, now)
 	case "serve":
 		return serveChecks(ctx, args[1:], stderr, open, now)
 	case "test":
@@ -103,18 +111,9 @@ func runChecks(ctx context.Context, args []string, stdout, stderr io.Writer, ope
 		fmt.Fprintln(stderr, err)
 		return exitError
 	}
-	if *name != "" {
-		var one []config.Check
-		for _, ch := range cfg.Checks {
-			if ch.Name == *name {
-				one = append(one, ch)
-			}
-		}
-		if len(one) == 0 {
-			fmt.Fprintf(stderr, "run: no check is named %q\n", *name)
-			return exitError
-		}
-		cfg.Checks = one
+	if err := onlyCheck(&cfg, *name); err != nil {
+		fmt.Fprintln(stderr, "run:", err)
+		return exitError
 	}
 	scope := check.Full
 	if *window {

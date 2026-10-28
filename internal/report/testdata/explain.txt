@@ -1,0 +1,25 @@
+money-checks explain at 2026-10-28 12:00:00 UTC, nothing ran.
+Warning: source billing: postgres: the user can write to charges; running anyway because require_read_only is false
+
+rebills expect (source billing, rows since 2026-10-27 12:00 UTC)
+  index: charges_created_at_idx on charges
+  rows estimated: 61
+
+rebills (source billing, rows since 2026-10-27 12:00 UTC)
+  index: charges_created_at_idx on charges
+  rows estimated: 61
+
+stuck (source billing, all rows)
+  full scan: payments
+  rows estimated: 120000
+  over --max-rows 100000
+  note: payments has no statistics: the estimates are a guess; run ANALYZE payments
+
+daily left (source shop, rows from 2026-10-25 12:00 UTC to 2026-10-28 10:00 UTC)
+  index: day_1 on totals
+  rows: unknown
+
+daily right (source stats, rows from 2026-10-25 12:00 UTC to 2026-10-28 10:00 UTC)
+  error: source stats: connection refused
+
+5 queries: 1 read a table in full, 1 failed, 1 over --max-rows 100000.
