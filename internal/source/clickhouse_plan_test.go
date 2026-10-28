@@ -59,6 +59,24 @@ func TestClickHouseExplainFullScan(t *testing.T) {
 	}
 }
 
+// A count() that the metadata of the parts answers reads no rows, and the summary
+// says why it names no table.
+func TestClickHouseExplainCountFromMetadata(t *testing.T) {
+	a, db := chDatabase(t)
+	a.exec("CREATE TABLE " + db + ".days (d Date, p UInt8, v UInt32) ENGINE = MergeTree PARTITION BY (p, toYYYYMM(d)) ORDER BY d")
+	a.exec("INSERT INTO " + db + ".days SELECT toDate('2026-01-01') + number % 300, number % 3, number FROM numbers(10000)")
+	src := openCHAdmin(t, a, db)
+	for _, q := range []string{"SELECT count() FROM days", "SELECT count() FROM days WHERE p = 1", "SELECT count() FROM days WHERE d >= '2026-05-01'"} {
+		p := explainCH(t, src, chCheck(q), time.Time{}, false)
+		if len(p.Scans) != 0 || len(p.Indexes) != 0 || p.Rows != 0 || len(p.Notes) != 1 || !strings.Contains(p.Notes[0], "metadata of the parts") {
+			t.Errorf("%s: scans %v, indexes %v, rows %d, notes %v", q, p.Scans, p.Indexes, p.Rows, p.Notes)
+		}
+	}
+	if p := explainCH(t, src, chCheck("SELECT count() FROM days WHERE v > 5"), time.Time{}, false); !slices.Equal(p.Scans, []string{db + ".days"}) || len(p.Notes) != 0 {
+		t.Errorf("v > 5: scans %v, notes %v; want days read in full", p.Scans, p.Notes)
+	}
+}
+
 // ClickHouse runs the subquery of IN to choose the parts to read. Without
 // analyze it must not.
 func TestClickHouseExplainDoesNotRunInSubqueries(t *testing.T) {

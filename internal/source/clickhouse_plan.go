@@ -128,6 +128,9 @@ func chSummary(raw string) (*plan, error) {
 	s := &plan{Plan: Plan{Raw: raw}}
 	var walk func(n chNode)
 	walk = func(n chNode) {
+		if n.NodeType == "ReadFromPreparedSource" && chMetadataCount(n.Description) {
+			s.note("count() comes from the metadata of the parts: no rows are read")
+		}
 		if n.NodeType == "ReadFromMergeTree" {
 			full := true
 			for _, ix := range n.Indexes {
@@ -159,6 +162,17 @@ func chSummary(raw string) (*plan, error) {
 		walk(d.Plan)
 	}
 	return s, nil
+}
+
+// chMetadataCount tells a count() that ClickHouse answers from the row counts and
+// the min and max of the parts, with no table read: without WHERE, or with one on
+// the partition key only.
+func chMetadataCount(description string) bool {
+	switch description {
+	case "Optimized trivial count", "_minmax_count_projection", "_exact_count_projection":
+		return true
+	}
+	return false
 }
 
 var _ Explainer = (*clickhouse)(nil)
