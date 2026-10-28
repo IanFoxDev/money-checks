@@ -2,6 +2,8 @@ package source
 
 import (
 	"context"
+	"database/sql"
+	"database/sql/driver"
 	"encoding/json"
 	"fmt"
 	"regexp"
@@ -36,13 +38,75 @@ func (m *mysqlSource) Explain(ctx context.Context, ch config.Check, since, until
 	if err := conn.QueryRowContext(ctx, explain+ch.Query).Scan(&raw); err != nil {
 		return Plan{}, err
 	}
-	if !analyze {
-		return mysqlJSON(raw)
-	}
-	p := mysqlTree(raw)
 	// The server stops the query a little before its limit.
-	p.Stopped = time.Since(start) >= ch.Timeout*95/100
+	stopped := analyze && time.Since(start) >= ch.Timeout*95/100
+	var names map[string]string
+	if !stopped {
+		names = mysqlTables(ctx, conn, ch.Query)
+	}
+	if !analyze {
+		return mysqlJSON(raw, names)
+	}
+	p := mysqlTree(raw, names)
+	p.Stopped = stopped
 	return p, nil
+}
+
+// mysqlTables maps the aliases of the query to their tables. Both plans name a
+// table by its alias; version 2 of EXPLAIN JSON, from MySQL 8.3, also gives the
+// table. On an older server the summary keeps the aliases.
+func mysqlTables(ctx context.Context, conn *sql.Conn, query string) map[string]string {
+	if _, err := conn.ExecContext(ctx, "SET SESSION explain_json_format_version = 2"); err != nil {
+		return nil
+	}
+	// The connection goes back to the pool, where version 1 is expected; one
+	// that cannot be set back is dropped.
+	defer func() {
+		if _, err := conn.ExecContext(context.WithoutCancel(ctx), "SET SESSION explain_json_format_version = 1"); err != nil {
+			_ = conn.Raw(func(any) error { return driver.ErrBadConn })
+		}
+	}()
+	var raw string
+	if err := conn.QueryRowContext(ctx, "EXPLAIN FORMAT=JSON "+query).Scan(&raw); err != nil {
+		return nil
+	}
+	var doc any
+	if json.Unmarshal([]byte(raw), &doc) != nil {
+		return nil
+	}
+	names := map[string]string{}
+	var walk func(v any)
+	walk = func(v any) {
+		switch x := v.(type) {
+		case []any:
+			for _, e := range x {
+				walk(e)
+			}
+		case map[string]any:
+			alias, _ := x["alias"].(string)
+			table, _ := x["table_name"].(string)
+			if alias != "" && table != "" {
+				// The same alias for two tables, in two subqueries, stays.
+				if t, ok := names[alias]; ok && t != table {
+					table = alias
+				}
+				names[alias] = table
+			}
+			for _, e := range x {
+				walk(e)
+			}
+		}
+	}
+	walk(doc)
+	return names
+}
+
+// mysqlName is the table of an alias, when names has it.
+func mysqlName(names map[string]string, alias string) string {
+	if t, ok := names[alias]; ok {
+		return t
+	}
+	return alias
 }
 
 // mysqlSubqueries are the keys of EXPLAIN JSON that hold subqueries of a query
@@ -56,7 +120,7 @@ var mysqlSubqueries = map[string]bool{
 // the tables before it in a nested loop produce, unless it is joined through a
 // hash join buffer; a dependent subquery runs once for each row of the table it
 // is attached to.
-func mysqlJSON(raw string) (Plan, error) {
+func mysqlJSON(raw string, names map[string]string) (Plan, error) {
 	var doc any
 	if err := json.Unmarshal([]byte(raw), &doc); err != nil {
 		return Plan{}, fmt.Errorf("mysql: the plan is not EXPLAIN JSON: %w", err)
@@ -75,6 +139,7 @@ func mysqlJSON(raw string) (Plan, error) {
 		case map[string]any:
 			if name, ok := x["table_name"].(string); ok {
 				if _, derived := x["materialized_from_subquery"]; !derived && !strings.HasPrefix(name, "<") {
+					name = mysqlName(names, name)
 					switch x["access_type"] {
 					case "ALL", "index":
 						s.scan(name)
@@ -168,7 +233,7 @@ var (
 
 // mysqlTree sums up the tree of EXPLAIN ANALYZE. A table scan of a temporary
 // table that the step below it materializes is not a table of the database.
-func mysqlTree(raw string) Plan {
+func mysqlTree(raw string, names map[string]string) Plan {
 	s := &plan{Plan: Plan{Raw: raw, Analyzed: true}}
 	lines := strings.Split(strings.TrimSpace(raw), "\n")
 	for i, line := range lines {
@@ -184,14 +249,14 @@ func mysqlTree(raw string) Plan {
 					continue
 				}
 			}
-			s.scan(t[1])
+			s.scan(mysqlName(names, t[1]))
 			read = true
 		} else if t := mysqlFullIndex.FindStringSubmatch(desc); t != nil {
-			s.scan(t[1])
-			s.index(t[2], t[1])
+			s.scan(mysqlName(names, t[1]))
+			s.index(t[2], mysqlName(names, t[1]))
 			read = true
 		} else if t := mysqlIndexUse.FindStringSubmatch(desc); t != nil {
-			s.index(t[2], t[1])
+			s.index(t[2], mysqlName(names, t[1]))
 			read = true
 		}
 		if read && m[3] != "" {

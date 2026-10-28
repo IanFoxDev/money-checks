@@ -115,3 +115,18 @@ func TestMySQLExplainSkipsMaterializedTables(t *testing.T) {
 		}
 	}
 }
+
+// Both plans name a table by its alias. The connections go back to the pool
+// with version 1 of EXPLAIN JSON, so the next plans read the same.
+func TestMySQLExplainNamesTablesNotAliases(t *testing.T) {
+	src := mysqlEvents(t)
+	ch := pgCheck("SELECT e.id FROM events e JOIN events nxt ON nxt.id = e.id + 1 WHERE e.created_at >= @since")
+	ch.Window = time.Hour
+	for i := range 6 {
+		analyze := i%2 == 1
+		p := explainMySQL(t, src, ch, time.Now().Add(-time.Hour), analyze)
+		if !slices.Contains(p.Indexes, "created_at on events") || !slices.Contains(p.Indexes, "PRIMARY on events") || len(p.Indexes) != 2 {
+			t.Fatalf("run %d, analyze %v: indexes %v; want those of events", i, analyze, p.Indexes)
+		}
+	}
+}
