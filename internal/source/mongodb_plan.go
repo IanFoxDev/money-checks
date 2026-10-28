@@ -57,7 +57,28 @@ func (m *mongodb) Explain(ctx context.Context, ch config.Check, since, until tim
 	if err != nil {
 		return Plan{}, fmt.Errorf("mongodb: the plan: %w", err)
 	}
-	return mongoSummary(string(text), analyze)
+	p, err := mongoSummary(string(text), analyze)
+	if err != nil || analyze || len(p.Scans) == 0 {
+		return p, err
+	}
+	// The query planner gives no estimate of rows; the count of a collection
+	// read in full comes from its metadata and reads no documents.
+	var rows int64
+	for _, name := range p.Scans {
+		copts := options.Collection()
+		if m.readPref != nil {
+			copts.SetReadPreference(m.readPref)
+		}
+		n, err := m.db.Collection(name, copts).EstimatedDocumentCount(ctx)
+		if err != nil {
+			p.Notes = append(p.Notes, "the documents of "+name+" could not be counted: "+err.Error())
+			return p, nil
+		}
+		rows += n
+	}
+	p.Rows = rows
+	p.Notes = append(p.Notes, "rows are the documents of the collections read in full, each counted once; MongoDB does not estimate the rest")
+	return p, nil
 }
 
 // mongoSummary walks an explain result. A query planner part names its

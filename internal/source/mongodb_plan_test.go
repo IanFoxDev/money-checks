@@ -82,8 +82,9 @@ func TestMongoDBExplainWindowUsesTheIndex(t *testing.T) {
 func TestMongoDBExplainFullScan(t *testing.T) {
 	src := mongoEvents(t)
 	const pipeline = `[{$match: {amount: 7}}, {$group: {_id: null, n: {$sum: 1}}}]`
-	if p := explainMongo(t, src, pipeline, false, false); !slices.Equal(p.Scans, []string{"events"}) {
-		t.Fatalf("scans %v; want events read in full", p.Scans)
+	// Without analyze the rows are the documents of events, from its metadata.
+	if p := explainMongo(t, src, pipeline, false, false); !slices.Equal(p.Scans, []string{"events"}) || p.Rows != 2000 || p.Analyzed || len(p.Notes) != 1 {
+		t.Fatalf("scans %v, rows %d, notes %v; want events read in full, 2000 estimated", p.Scans, p.Rows, p.Notes)
 	}
 	if p := explainMongo(t, src, pipeline, false, true); !slices.Equal(p.Scans, []string{"events"}) || p.Rows != 2000 {
 		t.Fatalf("with analyze: scans %v, rows %d; want 2000 read", p.Scans, p.Rows)
@@ -119,8 +120,8 @@ func TestMongoDBExplainLookupInThePlan(t *testing.T) {
 	if p := explainMongo(t, src, lookup("refs"), true, false); len(p.Scans) != 0 || !slices.Contains(p.Indexes, "k_1 on refs") || len(p.Notes) != 0 {
 		t.Fatalf("refs: scans %v, indexes %v, notes %v", p.Scans, p.Indexes, p.Notes)
 	}
-	if p := explainMongo(t, src, lookup("plain"), true, false); !slices.Equal(p.Scans, []string{"plain"}) {
-		t.Fatalf("plain: scans %v; want it read in full", p.Scans)
+	if p := explainMongo(t, src, lookup("plain"), true, false); !slices.Equal(p.Scans, []string{"plain"}) || p.Rows != 500 {
+		t.Fatalf("plain: scans %v, rows %d; want it read in full, its 500 documents", p.Scans, p.Rows)
 	}
 }
 

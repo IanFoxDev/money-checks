@@ -92,6 +92,13 @@ with --analyze", never as "no full scans". Both cases above were that kind of
 stage. MongoDB gives no estimate of rows, so without `--analyze` the rows of a
 MongoDB plan are unknown, and `--max-rows` does not apply to them.
 
+Changed in 0.8.1: a plan that reads a collection in full gets its size from
+`estimatedDocumentCount`, which reads the collection metadata, not its documents.
+With "rows: unknown" on every MongoDB plan, a check that reads a large collection
+in full on each run looks the same as one that reads a few hundred documents by an
+index, and the difference shows only with `--analyze`, which runs the query. The rows of an index read stay unknown, and a
+note says the number counts the full reads only, each once.
+
 **explain does not fail on a full scan.** On a small table a sequential scan is
 the right plan, and every recipe test would fail. The exit code is 0 when every
 plan was received and 2 when one could not be or the timeout stopped its query,
