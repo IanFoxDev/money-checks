@@ -87,10 +87,15 @@ plan was received and 2 when one could not be, as for a check that fails in `run
 as `run` returns 1 for violations: for CI against a copy of production size, where
 the number means something.
 
-**Only the plan leaves the database.** A plan holds names of tables, columns and
-indexes, the constants of the query, which are in the configuration already, and
-the window values. It holds no row. The output is text by default and JSON with
-`--json`; the raw plan of each check is in the JSON for those who want all of it.
+**The text output holds the summary, not the plan.** A plan holds names of
+tables, columns and indexes, the constants of the query, which are in the
+configuration already, and the window values. It can also hold a row. MySQL reads a
+table it can match by primary key or unique key to one row while it plans, and puts
+the values of that row into the plan: `p.id = 'p16'` joined to refunds came back as
+the condition `r.amount > '50.00'`, the amount of payment p16. So the text output
+prints only names, counts and notes. The raw plan of each query is in the `--json`
+output, which is for a person who reads plans and is treated like the CSV of `run`:
+a file to keep where the data may be kept.
 
 ## Why not
 

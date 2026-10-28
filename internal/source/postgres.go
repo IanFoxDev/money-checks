@@ -48,22 +48,11 @@ func openPostgres(ctx context.Context, p config.Postgres) (*postgres, error) {
 func (p *postgres) Query(ctx context.Context, ch config.Check, since, until time.Time, each func(Row) error) error {
 	ctx, cancel := context.WithTimeout(ctx, ch.Timeout)
 	defer cancel()
-	tx, err := p.pool.BeginTx(ctx, pgx.TxOptions{AccessMode: pgx.ReadOnly})
+	tx, args, err := p.begin(ctx, ch, since, until)
 	if err != nil {
 		return err
 	}
 	defer func() { _ = tx.Rollback(context.WithoutCancel(ctx)) }()
-	if _, err := tx.Exec(ctx, fmt.Sprintf("set local statement_timeout = %d", ch.Timeout.Milliseconds())); err != nil {
-		return err
-	}
-	args := []any{pgx.QueryResultFormats{pgx.TextFormatCode}}
-	if ch.Window > 0 || ch.Settle > 0 {
-		// A bind parameter, never text in the query.
-		args = append(args, since.UTC())
-	}
-	if ch.Settle > 0 {
-		args = append(args, until.UTC())
-	}
 	rows, err := tx.Query(ctx, ch.Query, args...)
 	if err != nil {
 		return err
@@ -86,6 +75,28 @@ func (p *postgres) Query(ctx context.Context, ch config.Check, since, until time
 		}
 	}
 	return rows.Err()
+}
+
+// begin opens the READ ONLY transaction of a check, with its timeout as
+// statement_timeout, and returns the arguments of its query.
+func (p *postgres) begin(ctx context.Context, ch config.Check, since, until time.Time) (pgx.Tx, []any, error) {
+	tx, err := p.pool.BeginTx(ctx, pgx.TxOptions{AccessMode: pgx.ReadOnly})
+	if err != nil {
+		return nil, nil, err
+	}
+	if _, err := tx.Exec(ctx, fmt.Sprintf("set local statement_timeout = %d", ch.Timeout.Milliseconds())); err != nil {
+		_ = tx.Rollback(context.WithoutCancel(ctx))
+		return nil, nil, err
+	}
+	args := []any{pgx.QueryResultFormats{pgx.TextFormatCode}}
+	if ch.Window > 0 || ch.Settle > 0 {
+		// A bind parameter, never text in the query.
+		args = append(args, since.UTC())
+	}
+	if ch.Settle > 0 {
+		args = append(args, until.UTC())
+	}
+	return tx, args, nil
 }
 
 func (p *postgres) Close(context.Context) error {
