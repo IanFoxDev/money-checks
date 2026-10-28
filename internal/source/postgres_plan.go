@@ -47,8 +47,11 @@ func (p *postgres) Explain(ctx context.Context, ch config.Check, since, until ti
 	var doc []struct {
 		Plan pgNode `json:"Plan"`
 	}
-	if err := json.Unmarshal([]byte(raw), &doc); err != nil || len(doc) != 1 {
-		return Plan{}, fmt.Errorf("postgres: the plan is not EXPLAIN JSON: %v", err)
+	if err := json.Unmarshal([]byte(raw), &doc); err != nil {
+		return Plan{}, fmt.Errorf("postgres: the plan is not EXPLAIN JSON: %w", err)
+	}
+	if len(doc) != 1 {
+		return Plan{}, fmt.Errorf("postgres: EXPLAIN returned %d plans, want 1", len(doc))
 	}
 	stats := map[[2]string]float64{}
 	var tables func(n pgNode)

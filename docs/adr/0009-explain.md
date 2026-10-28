@@ -82,7 +82,8 @@ never as "no full scans". Both cases above were that kind of stage.
 
 **explain does not fail on a full scan.** On a small table a sequential scan is
 the right plan, and every recipe test would fail. The exit code is 0 when every
-plan was received and 2 when one could not be, as for a check that fails in `run`.
+plan was received and 2 when one could not be or the timeout stopped its query,
+as for a check that fails in `run`.
 `--max-rows N` makes it 1 when a plan expects to read, or read, more than N rows,
 as `run` returns 1 for violations: for CI against a copy of production size, where
 the number means something.
