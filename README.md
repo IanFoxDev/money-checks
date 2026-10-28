@@ -244,6 +244,52 @@ A missing row, an extra one or an amount that differs fails the test, with a dif
 money-checks never writes the test data: it holds no credentials that can write,
 so the database is filled by your migrations and seeds. Details: `docs/config.md`.
 
+## Before a check goes to serve
+
+A test database has a few hundred rows, so a test says the query is right, not that
+it is cheap. In production `serve` runs it every few minutes: a `$lookup` without an
+index on the other collection reads that collection once for every document, and a
+check that took 40 ms in CI holds a connection until its timeout. `explain` asks
+the database for the plan of every query of the configuration, the `expect` queries
+too, and runs none of them:
+
+```
+$ money-checks explain -c checks.yaml --window --check refund_exceeds_payment
+money-checks explain at 2026-10-28 14:32:21 UTC, nothing ran.
+
+refund_exceeds_payment expect (source app, rows since 2026-10-27 14:32 UTC)
+  full scan: refunds
+  index: created_at on refunds
+  rows estimated: 9
+
+refund_exceeds_payment (source app, rows since 2026-10-27 14:32 UTC)
+  index: created_at on refunds
+  index: PRIMARY on payments
+  index: payment_id on refunds
+  rows estimated: 3
+
+2 queries: 1 read a table in full, 0 failed.
+```
+
+The check reads refunds by date, as its window needs. Its `expect` counts every
+refund, a pass over a whole index on each run: cheap on this table, not on one
+with fifty million rows.
+
+- `--window` gives each query the start of its window, as `serve` does between full
+  passes. Without it the plan is the one of a full pass, which on a large table
+  reads it anyway.
+- The output says what it cannot know. MongoDB gives no row estimates, and a
+  `$lookup` stage that is not part of the query plan is listed as "not checked".
+  `--analyze` runs the queries, through the same read-only session and with the
+  same timeout as `run`, and counts the rows they read.
+- A full scan is not an error: on a small table it is the right plan. The exit
+  code is 2 when a plan could not be had, and 1 with `--max-rows N` when a plan
+  reads more than N rows, for CI against a copy of production size.
+- The text holds names and counts only. A plan can hold the values of a row, so
+  the plans themselves go to the `--json` file alone.
+
+Why it works this way: `docs/adr/0009-explain.md`.
+
 ## Known violations
 
 The first run against a real database usually finds old rows that were looked at
