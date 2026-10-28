@@ -43,8 +43,13 @@ read-only users the recipes use:
   `explain` command itself; set inside the `aggregate`, it was ignored and the
   explain ran for almost four seconds against a limit of 300 ms.
 - **ClickHouse.** `EXPLAIN indexes = 1` and `EXPLAIN ESTIMATE` work under
-  `readonly=2` and read no data. They show which parts and granules the primary
-  key and partition key leave to read.
+  `readonly=2` and read no rows of the table. They show which parts and granules
+  the primary key and partition key leave to read. But to choose those parts
+  ClickHouse **runs the subqueries of `IN (SELECT ...)`** and builds their sets:
+  an explain with a subquery over `numbers(300000000)` ran for 8.7 seconds and
+  stopped at the memory limit. With `use_index_for_in_with_subqueries = 0` the
+  same explain took 90 ms, and the plan used no index for that `IN`.
+  `max_execution_time` stops the subquery, as it stops a check.
 
 ## Decision
 
@@ -69,13 +74,17 @@ sure is safe to run.
 | PostgreSQL | `EXPLAIN (FORMAT JSON)` | `EXPLAIN (ANALYZE, BUFFERS, FORMAT JSON)` |
 | MySQL | `EXPLAIN FORMAT=JSON` | `EXPLAIN ANALYZE` |
 | MongoDB | `explain`, `queryPlanner` | `explain`, `executionStats` |
-| ClickHouse | `EXPLAIN indexes = 1` | `EXPLAIN ESTIMATE` as well |
+| ClickHouse | `EXPLAIN json = 1, indexes = 1` and `EXPLAIN ESTIMATE`, `use_index_for_in_with_subqueries = 0` | the same, with the subqueries of `IN` run |
 
 `--analyze` runs the query through the same source as `run`: the same read-only
 transaction or session, the same timeout. On MongoDB the timeout goes on the
 `explain` command as `maxTimeMS`. On MySQL a plan that took as long as the timeout
 is reported as stopped by the timeout, not as a plan. ClickHouse has no explain
-that runs the query; `--analyze` adds the estimate and nothing more.
+that runs the query: its rows are always the estimate, and `--analyze` only lets
+it run the subqueries of `IN`, so the plan shows the parts it would really read.
+A query with `IN (SELECT ...)` explained without `--analyze` gets a note that the
+plan uses no index for it. A user whose profile sets `readonly=1` cannot send
+that setting, and the note says the subqueries ran with no time limit.
 
 **The summary says what it does not know.** A MongoDB `$lookup` stage outside
 the query plan, explained without `--analyze`, is listed as "not checked: explain

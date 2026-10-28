@@ -199,26 +199,7 @@ const chTimeFormat = "2006-01-02 15:04:05.000000"
 func (c *clickhouse) Query(ctx context.Context, ch config.Check, since, until time.Time, each func(Row) error) error {
 	ctx, cancel := context.WithTimeout(ctx, ch.Timeout)
 	defer cancel()
-	settings := url.Values{}
-	if c.readonly == "1" {
-		settings.Set("readonly", "1")
-	} else {
-		settings.Set("readonly", "2")
-		settings.Set("max_execution_time", strconv.FormatInt(int64(math.Ceil(ch.Timeout.Seconds())), 10))
-		settings.Set("cancel_http_readonly_queries_on_client_close", "1")
-	}
-	if ch.Window > 0 {
-		// A query parameter, never text in the query. It is allowed under
-		// readonly=1 too.
-		since = since.UTC()
-		if since.Before(chMinTime) {
-			since = chMinTime
-		}
-		settings.Set("param_since", since.Format(chTimeFormat))
-	}
-	if ch.Settle > 0 {
-		settings.Set("param_until", until.UTC().Format(chTimeFormat))
-	}
+	settings := c.settings(ch, since, until)
 	resp, err := c.post(ctx, ch.Query, settings)
 	if err != nil {
 		return err
@@ -263,6 +244,32 @@ func (c *clickhouse) Query(ctx context.Context, ch config.Check, since, until ti
 		}
 	}
 	return nil
+}
+
+// settings are those of a query of the check: readonly, the timeout and the
+// window parameters.
+func (c *clickhouse) settings(ch config.Check, since, until time.Time) url.Values {
+	settings := url.Values{}
+	if c.readonly == "1" {
+		settings.Set("readonly", "1")
+	} else {
+		settings.Set("readonly", "2")
+		settings.Set("max_execution_time", strconv.FormatInt(int64(math.Ceil(ch.Timeout.Seconds())), 10))
+		settings.Set("cancel_http_readonly_queries_on_client_close", "1")
+	}
+	if ch.Window > 0 {
+		// A query parameter, never text in the query. It is allowed under
+		// readonly=1 too.
+		since = since.UTC()
+		if since.Before(chMinTime) {
+			since = chMinTime
+		}
+		settings.Set("param_since", since.Format(chTimeFormat))
+	}
+	if ch.Settle > 0 {
+		settings.Set("param_until", until.UTC().Format(chTimeFormat))
+	}
+	return settings
 }
 
 // unescapeTSV undoes the escaping of TabSeparated: \t, \n, \\ and the rest.
