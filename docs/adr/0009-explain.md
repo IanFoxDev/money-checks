@@ -34,11 +34,12 @@ read-only users the recipes use:
   error**: the plan comes back with the times up to the limit and `rows=0` at the
   top, and looks like a finished plan.
 - **MongoDB.** The `read` role may run `explain`. With `queryPlanner` verbosity a
-  `$lookup` on `localField`/`foreignField` shows its join strategy (`HashJoin`,
-  `IndexedLoopJoin`, `NestedLoopJoin`), but a `$lookup` with `let` and `pipeline`
-  shows only its own definition: nothing about the other collection. With
-  `executionStats` the same stage reports `collectionScans`, `indexesUsed` and
-  `totalDocsExamined`. `maxTimeMS` stops `explain` only when it is set on the
+  `$lookup` on `localField`/`foreignField` that the query planner takes into the
+  plan shows its join strategy (`HashJoin`, `IndexedLoopJoin`, `NestedLoopJoin`).
+  A `$lookup` with `let` and `pipeline`, and one on `localField` that stays a
+  stage of its own (followed by `$unwind` and `$group`, it did), shows only its
+  definition: nothing about the other collection. With `executionStats` such a
+  stage reports `collectionScans`, `indexesUsed` and `totalDocsExamined`. `maxTimeMS` stops `explain` only when it is set on the
   `explain` command itself; set inside the `aggregate`, it was ignored and the
   explain ran for almost four seconds against a limit of 300 ms.
 - **ClickHouse.** `EXPLAIN indexes = 1` and `EXPLAIN ESTIMATE` work under
@@ -76,9 +77,11 @@ transaction or session, the same timeout. On MongoDB the timeout goes on the
 is reported as stopped by the timeout, not as a plan. ClickHouse has no explain
 that runs the query; `--analyze` adds the estimate and nothing more.
 
-**The summary says what it does not know.** A MongoDB `$lookup` with a pipeline,
-explained without `--analyze`, is listed as "not checked: run with --analyze",
-never as "no full scans". Both cases above were that kind of stage.
+**The summary says what it does not know.** A MongoDB `$lookup` stage outside
+the query plan, explained without `--analyze`, is listed as "not checked: explain
+with --analyze", never as "no full scans". Both cases above were that kind of
+stage. MongoDB gives no estimate of rows, so without `--analyze` the rows of a
+MongoDB plan are unknown, and `--max-rows` does not apply to them.
 
 **explain does not fail on a full scan.** On a small table a sequential scan is
 the right plan, and every recipe test would fail. The exit code is 0 when every
