@@ -50,7 +50,7 @@ checks:
 ```bash
 docker run --rm -v "$PWD:/etc/money-checks" \
   -e SHOP_MONGO_URI='mongodb://checks:secret@db/?authSource=shop&readPreference=secondary' \
-  ghcr.io/ianfoxdev/money-checks:0.7 run -c /etc/money-checks/checks.yaml
+  ghcr.io/ianfoxdev/money-checks:0.8 run -c /etc/money-checks/checks.yaml
 ```
 
 ```

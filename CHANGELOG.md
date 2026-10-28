@@ -8,6 +8,8 @@ configuration, the report format or the metric names; such changes are marked
 
 ## [Unreleased]
 
+## [0.8.0] - 2026-10-28
+
 ### Added
 
 - `money-checks explain`: the plan of every query of a configuration, the
@@ -259,7 +261,8 @@ CI, with the database tests required to run.
 - `show` and `mask` for the columns a report may contain.
 - Docker image and the example in `examples/subscriptions`.
 
-[Unreleased]: https://github.com/IanFoxDev/money-checks/compare/v0.7.0...HEAD
+[Unreleased]: https://github.com/IanFoxDev/money-checks/compare/v0.8.0...HEAD
+[0.8.0]: https://github.com/IanFoxDev/money-checks/compare/v0.7.0...v0.8.0
 [0.7.0]: https://github.com/IanFoxDev/money-checks/compare/v0.6.1...v0.7.0
 [0.6.1]: https://github.com/IanFoxDev/money-checks/compare/v0.6.0...v0.6.1
 [0.6.0]: https://github.com/IanFoxDev/money-checks/compare/v0.5.0...v0.6.0
