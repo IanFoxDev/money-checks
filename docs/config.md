@@ -584,8 +584,8 @@ money-checks version
 
 `run` writes the Markdown report to stdout unless `--markdown` names a file, and the
 JSON report when `--json` is given. With `--window`, checks that have a `window` read
-only its rows; without it, `run` reads every row. Warnings and the errors of failed checks go to
-stderr. `serve` logs JSON to stderr and stops on SIGINT or SIGTERM.
+only its rows; without it, `run` reads every row. The errors of failed checks go to
+stderr, and the warnings too when the report is not on stdout: the report lists them. `serve` logs JSON to stderr and stops on SIGINT or SIGTERM.
 
 With `--check`, `run` runs that check only. `--csv` and `--jsonl` then write every
 violation it finds, not only the samples of the report: the list a refund or a
@@ -617,7 +617,7 @@ collections read in full, the indexes used and the rows, then the notes:
 |---|---|---|
 | postgres | `EXPLAIN (VERBOSE, FORMAT JSON)`; rows estimated, a full scan counted by the rows of the table | `EXPLAIN (ANALYZE, BUFFERS, ...)`; rows read |
 | mysql | `EXPLAIN FORMAT=JSON`; rows estimated | `EXPLAIN ANALYZE`; rows read |
-| mongodb | `explain` with `queryPlanner`; no rows | `explain` with `executionStats`; documents examined |
+| mongodb | `explain` with `queryPlanner`; the documents of the collections read in full, from their metadata | `explain` with `executionStats`; documents examined |
 | clickhouse | `EXPLAIN json = 1, indexes = 1` and `EXPLAIN ESTIMATE`; rows estimated | the same, with the subqueries of `IN` run |
 
 - A full scan is a table, collection or whole index read from start to end: Seq
@@ -634,12 +634,17 @@ collections read in full, the indexes used and the rows, then the notes:
   stage outside the query plan gets the note "not checked" without `--analyze`;
   with it the stage reports the collection scans and indexes it used. A
   `$graphLookup` gets the note either way: explain does not say how it reads.
-  `--max-rows` does not apply to a plan without rows.
+  Without `--analyze` a plan with a `COLLSCAN` gets the size of each collection it
+  reads in full (`estimatedDocumentCount`, which reads no documents), each counted
+  once; a plan that only uses indexes has no rows, and `--max-rows` does not apply
+  to it.
 - ClickHouse: to choose the parts to read, ClickHouse runs the subqueries of
   `IN (SELECT ...)` while it plans. Without `--analyze` money-checks turns that off
   (`use_index_for_in_with_subqueries = 0`) and says so in a note; a user whose
   profile sets `readonly=1` cannot, and the note says the subqueries ran without a
-  time limit. The rows are always the estimate.
+  time limit. The rows are always the estimate. A `count()` without `WHERE`, or
+  with one on the partition key only, is answered from the metadata of the parts:
+  it names no table, reads no rows, and gets a note saying so.
 - The output never holds the plan: MySQL puts the values of a row it read while
   planning into it. `--json` writes the summaries and the plans as the databases
   return them, readable by the owner only, as the files of `run --csv`.

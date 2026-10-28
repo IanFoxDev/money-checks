@@ -8,6 +8,21 @@ configuration, the report format or the metric names; such changes are marked
 
 ## [Unreleased]
 
+### Changed
+
+- `explain` on MongoDB without `--analyze`: a plan that reads a collection in full
+  gets the number of its documents as the rows, from the collection metadata. It
+  used to say "rows: unknown" on every MongoDB plan, so `--max-rows` now applies to
+  such a plan.
+- `explain` on ClickHouse: a `count()` answered from the metadata of the parts gets
+  a note that it reads no rows, instead of "rows estimated: 0" with no table.
+
+### Fixed
+
+- `explain`, and `run` with the report on stdout, printed every warning twice:
+  on stderr and in the report. The warnings now go to stderr only when the report
+  goes to a file.
+
 ## [0.8.0] - 2026-10-28
 
 ### Added

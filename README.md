@@ -278,7 +278,8 @@ with fifty million rows.
 - `--window` gives each query the start of its window, as `serve` does between full
   passes. Without it the plan is the one of a full pass, which on a large table
   reads it anyway.
-- The output says what it cannot know. MongoDB gives no row estimates, and a
+- The output says what it cannot know. MongoDB gives no row estimates: a
+  collection read in full is counted by its size, other reads stay unknown, and a
   `$lookup` stage that is not part of the query plan is listed as "not checked".
   `--analyze` runs the queries, through the same read-only session and with the
   same timeout as `run`, and counts the rows they read.
