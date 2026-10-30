@@ -21,4 +21,4 @@ configMapGenerator:
       - checks.yaml
 images:
   - name: ghcr.io/ianfoxdev/money-checks
-    newTag: 0.8.0
+    newTag: 0.8.1
