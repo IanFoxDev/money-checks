@@ -576,6 +576,7 @@ money-checks run -c checks.yaml [--window] [--markdown file] [--json file]
                  [--check NAME [--csv file] [--jsonl file]]
 money-checks explain -c checks.yaml [--window] [--check NAME] [--analyze]
                      [--json file] [--max-rows N]
+money-checks validate -c checks.yaml [--without-known] [--env]
 money-checks serve -c checks.yaml
 money-checks known add -c checks.yaml --check NAME --reason TEXT [--until DATE] [--limit N]
 money-checks test -c checks.yaml -t tests.yaml
@@ -662,6 +663,15 @@ The file is created if it does not exist. Appending needs the `known` list to be
 last key of the file; otherwise nothing is written and the entries are printed to
 add by hand. Exit code 0 when entries were added or there was nothing to add, 2 on
 an error.
+
+`validate` reads the configuration as `run` does and connects to nothing: the
+format, the files it names, every pipeline as MongoDB will get it, and the known
+file. It suits the CI of a repository that keeps the checks of a company apart
+from the tool, where there are no databases and no secrets. `--without-known`
+leaves out the known file, kept as a secret elsewhere; `--env` also requires every
+environment variable of the sources and of Slack, the check before a deploy where
+the secrets are. Warnings go to stderr. Exit code 0 when the configuration is
+valid, 2 when it is not.
 
 `test` runs the checks a tests file lists and compares what they find with what
 they must find, below. Exit code 0 when every test passes, 1 when one does not, 2

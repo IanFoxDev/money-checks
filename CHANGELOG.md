@@ -8,6 +8,13 @@ configuration, the report format or the metric names; such changes are marked
 
 ## [Unreleased]
 
+### Added
+
+- `money-checks validate`: reads a configuration as `run` does, every MongoDB
+  pipeline and the known file included, and connects to nothing, for the CI of a
+  repository of checks. `--without-known` leaves out the known file, `--env` also
+  requires the environment variables of the sources and Slack.
+
 ## [0.8.1] - 2026-10-30
 
 ### Changed

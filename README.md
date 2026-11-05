@@ -244,6 +244,15 @@ A missing row, an extra one or an amount that differs fails the test, with a dif
 money-checks never writes the test data: it holds no credentials that can write,
 so the database is filled by your migrations and seeds. Details: `docs/config.md`.
 
+Where the checks live in their own repository, without a database to test
+against, `validate` catches the mistakes a deploy would find first: an unknown key,
+a window shorter than `every`, a pipeline MongoDB would refuse. An entry of the
+known file for a check that is gone is a warning. It connects to nothing:
+
+```bash
+money-checks validate -c checks.yaml --without-known
+```
+
 ## Before a check goes to serve
 
 A test database has a few hundred rows, so a test says the query is right, not that
