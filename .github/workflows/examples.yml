@@ -139,6 +139,8 @@ jobs:
     steps:
       - uses: actions/checkout@v7
       - run: docker compose build
+      - name: Every recipe catalog is valid without a database
+        run: for db in postgres mongodb clickhouse mysql; do docker compose run --rm -T money-checks validate -c /recipes/$db/checks.yaml; done
       - name: PostgreSQL recipes find exactly the planted violations
         run: docker compose run --rm money-checks test -c /recipes/postgres/checks.yaml -t /recipes/postgres/tests.yaml
       - name: MongoDB recipes find exactly the planted violations
