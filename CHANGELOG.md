@@ -8,6 +8,8 @@ configuration, the report format or the metric names; such changes are marked
 
 ## [Unreleased]
 
+## [0.8.2] - 2026-11-05
+
 ### Added
 
 - `money-checks validate`: reads a configuration as `run` does, every MongoDB
@@ -285,7 +287,8 @@ CI, with the database tests required to run.
 - `show` and `mask` for the columns a report may contain.
 - Docker image and the example in `examples/subscriptions`.
 
-[Unreleased]: https://github.com/IanFoxDev/money-checks/compare/v0.8.1...HEAD
+[Unreleased]: https://github.com/IanFoxDev/money-checks/compare/v0.8.2...HEAD
+[0.8.2]: https://github.com/IanFoxDev/money-checks/compare/v0.8.1...v0.8.2
 [0.8.1]: https://github.com/IanFoxDev/money-checks/compare/v0.8.0...v0.8.1
 [0.8.0]: https://github.com/IanFoxDev/money-checks/compare/v0.7.0...v0.8.0
 [0.7.0]: https://github.com/IanFoxDev/money-checks/compare/v0.6.1...v0.7.0
