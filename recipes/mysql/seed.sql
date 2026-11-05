@@ -189,3 +189,8 @@ insert into subscriptions (id, owner, status, price, currency, current_period_en
     ('s3', 'carl',  'active',  14.00, 'EUR', now() - interval 1 day),
     ('s4', 'dana',  'expired',  9.99, 'USD', now() - interval 30 day),
     ('s6', 'eve',   'active',   1200, 'JPY', now() - interval 40 day);
+
+-- InnoDB counts the rows of a table some time after the inserts, so the plans of
+-- explain would depend on how fast the database started. On tables this small the
+-- planner picks between a full scan and an index on those numbers.
+analyze table accounts, entries, orders, payments, refunds, chargebacks, subscriptions;
