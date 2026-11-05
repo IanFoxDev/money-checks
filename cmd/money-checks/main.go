@@ -42,6 +42,9 @@ const usage = `usage:
       the indexes and the rows; nothing runs unless --analyze; the plans themselves go
       only to the --json file; 0 every plan received, 1 one reads more than --max-rows,
       2 a plan could not be received or the timeout stopped its query
+  money-checks validate -c checks.yaml [--without-known] [--env]
+      read the configuration as run does, every pipeline included, and connect to
+      nothing; with --env the environment variables must be set too; 0 valid, 2 not
   money-checks serve -c checks.yaml
       run the checks now and every serve.interval; /metrics, /healthz, /readyz on serve.listen
   money-checks known add -c checks.yaml --check NAME --reason TEXT [--until DATE] [--limit N]
@@ -73,6 +76,8 @@ func run(ctx context.Context, args []string, stdout, stderr io.Writer, open chec
 		return runChecks(ctx, args[1:], stdout, stderr, open, now)
 	case "explain":
 		return explainChecks(ctx, args[1:], stdout, stderr, open, now)
+	case "validate":
+		return validateChecks(args[1:], stdout, stderr)
 	case "serve":
 		return serveChecks(ctx, args[1:], stderr, open, now)
 	case "test":

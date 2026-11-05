@@ -68,6 +68,21 @@ func (s Source) Kind() string {
 	}
 }
 
+// Env is the name of the environment variable with the connection string.
+func (s Source) Env() string {
+	switch {
+	case s.MongoDB != nil:
+		return s.MongoDB.URIEnv
+	case s.ClickHouse != nil:
+		return s.ClickHouse.URLEnv
+	case s.MySQL != nil:
+		return s.MySQL.DSNEnv
+	case s.Postgres != nil:
+		return s.Postgres.DSNEnv
+	}
+	return ""
+}
+
 // MongoDB reads with aggregation pipelines. The read preference comes from the URI.
 type MongoDB struct {
 	URIEnv   string `yaml:"uri_env"`
