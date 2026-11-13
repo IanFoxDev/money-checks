@@ -8,6 +8,9 @@ on:
 jobs:
   test:
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      id-token: write
     services:
       postgres:
         image: postgres:17-alpine
@@ -68,7 +71,14 @@ jobs:
         with:
           go-version-file: go.mod
       - run: go vet ./...
-      - run: go test -race ./...
+      - run: go test -race -coverpkg=./internal/... -coverprofile=coverage.out ./...
+      - run: go tool cover -func=coverage.out | tail -1
+      # Coverage goes to Codecov over OIDC, no token in the repository.
+      - uses: codecov/codecov-action@v7
+        with:
+          use_oidc: true
+          files: coverage.out
+          fail_ci_if_error: false
       - uses: golangci/golangci-lint-action@v9
         with:
           version: v2.14.0
