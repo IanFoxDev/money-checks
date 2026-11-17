@@ -8,6 +8,12 @@ configuration, the report format or the metric names; such changes are marked
 
 ## [Unreleased]
 
+### Added
+
+- `recipes/ledger`: five checks for the tables of `ianfoxdev/ledger` in PostgreSQL and
+  MySQL (unbalanced transaction, broken balance chain, sequence gap, negative balance,
+  expired credit lot that was not expired), tested in CI.
+
 ## [0.8.2] - 2026-11-05
 
 ### Added

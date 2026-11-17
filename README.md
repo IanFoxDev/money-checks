@@ -422,6 +422,8 @@ payment stuck in pending, an order paid and
 never fulfilled, daily totals that differ between the app and ClickHouse, and
 more. Each comes for PostgreSQL, MySQL and MongoDB, or ClickHouse, with rows that break it,
 rows next to them that must not, and a test in CI.
+[recipes/ledger](recipes/ledger) checks the tables of
+[ianfoxdev/ledger](https://github.com/IanFoxDev/ledger) as they are.
 
 ## Example
 

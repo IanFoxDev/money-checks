@@ -32,6 +32,29 @@ shows what it catches and what it must leave alone.
 | `daily_totals_match` | Payments per day and currency differ between the app and analytics: a lost batch, a replayed one, test payments written to analytics only | [query](postgres/daily_totals_match.sql) | [query](mysql/daily_totals_match.sql) | [pipeline](mongodb/daily_totals_match.yaml) | [query](clickhouse/daily_totals.sql) |
 | `duplicate_rows` | An event is in a ClickHouse table twice: a consumer crashed after the insert and before it committed its offset | | | | [query](clickhouse/duplicate_rows.sql) |
 
+## ianfoxdev/ledger
+
+[ledger/](ledger) has checks for the tables of
+[ianfoxdev/ledger](https://github.com/IanFoxDev/ledger), in PostgreSQL and MySQL.
+Its tables are a read contract, so these need no renaming: copy the files as they are.
+The library keeps every one of these invariants on each write, and `verify()` checks
+them all. These run without PHP, from a replica, every few minutes, and report to Slack
+and `/metrics` like any other check: they find rows written around the library, by a
+script, a migration or a hand fix, and a cron job that did not run.
+
+| Recipe | What it finds | PostgreSQL | MySQL |
+|---|---|---|---|
+| `ledger_unbalanced_transaction` | A transaction whose debits and credits differ in a currency | [query](ledger/postgres/ledger_unbalanced_transaction.sql) | [query](ledger/mysql/ledger_unbalanced_transaction.sql) |
+| `ledger_balance_chain` | A `balance_after` that is not the balance before plus the posting. A row fixed by hand shows twice: the difference on it, and minus that on the next posting | [query](ledger/postgres/ledger_balance_chain.sql) | [query](ledger/mysql/ledger_balance_chain.sql) |
+| `ledger_sequence_gap` | An account whose postings are numbered with a hole: a deleted row | [query](ledger/postgres/ledger_sequence_gap.sql) | [query](ledger/mysql/ledger_sequence_gap.sql) |
+| `ledger_negative_balance` | An account below zero that was not opened with `allowNegative` | [query](ledger/postgres/ledger_negative_balance.sql) | [query](ledger/mysql/ledger_negative_balance.sql) |
+| `ledger_lot_not_expired` | A credit lot an hour past its expiry that still holds credits: `ledger credits:expire` did not run, or stopped at `--limit` | [query](ledger/postgres/ledger_lot_not_expired.sql) | [query](ledger/mysql/ledger_lot_not_expired.sql) |
+
+On a ledger written only by the library, all five find nothing. Most read whole tables;
+`ledger_unbalanced_transaction` reads a 24 hour window by `ledger_transactions.created_at`,
+which needs the index the ledger's schema leaves to you:
+`CREATE INDEX ledger_transactions_created_at ON ledger_transactions (created_at)`.
+
 ## Test them
 
 Each database gets the tables the recipes read (`postgres/schema.sql`,
@@ -47,6 +70,8 @@ docker compose run --rm money-checks test -c /recipes/postgres/checks.yaml -t /r
 docker compose run --rm money-checks test -c /recipes/mongodb/checks.yaml -t /recipes/mongodb/tests.yaml
 docker compose run --rm money-checks test -c /recipes/clickhouse/checks.yaml -t /recipes/clickhouse/tests.yaml
 docker compose run --rm money-checks test -c /recipes/mysql/checks.yaml -t /recipes/mysql/tests.yaml
+docker compose run --rm money-checks test -c /recipes/ledger/postgres/checks.yaml -t /recipes/ledger/postgres/tests.yaml
+docker compose run --rm money-checks test -c /recipes/ledger/mysql/checks.yaml -t /recipes/ledger/mysql/tests.yaml
 ```
 
 The rows the lifecycle recipes read are dated from now: `now() - interval '3 hours'`
