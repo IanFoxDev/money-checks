@@ -1,0 +1,60 @@
+# Invariants of ianfoxdev/ledger, read from its own tables in PostgreSQL. The
+# library keeps them on every write; these checks find rows written around it and
+# jobs that did not run. Point the source at a replica of the database the ledger
+# writes to. The table and column names are the ledger's read contract (its ADR 0002):
+# copy the files as they are.
+# CI runs money-checks test with tests.yaml against schema.sql and seed.sql.
+version: 1
+defaults:
+  timeout: 30s
+sources:
+  ledger:
+    postgres:
+      dsn_env: LEDGER_PG_DSN
+
+checks:
+  - name: ledger_unbalanced_transaction
+    description: A ledger transaction whose debits and credits differ in a currency.
+    source: ledger
+    window: 24h
+    query_file: ledger_unbalanced_transaction.sql
+    id: id
+    amount: {field: imbalance, unit: minor, currency_field: currency}
+    show: [idempotency_key, type]
+    expect: {query: select count(*) from ledger_transactions}
+
+  - name: ledger_balance_chain
+    description: A posting whose balance_after is not the balance before it plus the posting.
+    source: ledger
+    every: 6h
+    query_file: ledger_balance_chain.sql
+    id: id
+    amount: {field: difference, unit: minor, currency_field: currency}
+    show: [idempotency_key]
+    expect: {query: select count(*) from ledger_postings}
+
+  - name: ledger_sequence_gap
+    description: An account whose postings are numbered with a hole, a deleted row.
+    source: ledger
+    every: 6h
+    query_file: ledger_sequence_gap.sql
+    id: id
+    show: [postings, last_sequence]
+    expect: {query: select count(*) from ledger_postings}
+
+  - name: ledger_negative_balance
+    description: An account below zero that was not opened with allowNegative.
+    source: ledger
+    query_file: ledger_negative_balance.sql
+    id: id
+    amount: {field: balance, unit: minor, currency_field: currency}
+    expect: {query: select count(*) from ledger_accounts}
+
+  - name: ledger_lot_not_expired
+    description: A credit lot an hour past its expiry that still holds credits.
+    source: ledger
+    query_file: ledger_lot_not_expired.sql
+    id: id
+    amount: {field: balance, unit: minor, currency_field: currency}
+    show: [expires]
+    expect: {query: select count(*) from ledger_accounts}

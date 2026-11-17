@@ -1,0 +1,20 @@
+# What each recipe must find in seed.sql, by id and amount.
+version: 1
+tests:
+  - check: ledger_unbalanced_transaction
+    violations:
+      - {id: '3:USD', amount: 5.00 USD}
+      - {id: '6:USD', amount: -2.00 USD}
+  - check: ledger_balance_chain
+    violations:
+      - {id: 'user:1#2', amount: 5.00 USD}
+      - {id: 'user:2#3', amount: -2.00 USD}
+  - check: ledger_sequence_gap
+    violations:
+      - {id: 'user:2'}
+  - check: ledger_negative_balance
+    violations:
+      - {id: 'user:3', amount: -5.00 USD}
+  - check: ledger_lot_not_expired
+    violations:
+      - {id: 'user:1:credits@lot:20260101T000000Z:aaaaaaaaaaaa', amount: 30.00 USD}

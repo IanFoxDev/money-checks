@@ -4,6 +4,8 @@
 #   docker compose run --rm money-checks test -c /recipes/mongodb/checks.yaml -t /recipes/mongodb/tests.yaml
 #   docker compose run --rm money-checks test -c /recipes/clickhouse/checks.yaml -t /recipes/clickhouse/tests.yaml
 #   docker compose run --rm money-checks test -c /recipes/mysql/checks.yaml -t /recipes/mysql/tests.yaml
+#   docker compose run --rm money-checks test -c /recipes/ledger/postgres/checks.yaml -t /recipes/ledger/postgres/tests.yaml
+#   docker compose run --rm money-checks test -c /recipes/ledger/mysql/checks.yaml -t /recipes/ledger/mysql/tests.yaml
 name: money-checks-recipes
 
 services:
@@ -69,6 +71,36 @@ services:
       interval: 2s
       retries: 60
 
+  # The tables of ianfoxdev/ledger, for the recipes in ledger/.
+  ledger-postgres:
+    image: postgres:17-alpine
+    environment:
+      POSTGRES_USER: ledger
+      POSTGRES_PASSWORD: ledger
+      POSTGRES_DB: ledger
+    volumes:
+      - ./ledger/postgres/schema.sql:/docker-entrypoint-initdb.d/1-schema.sql:ro
+      - ./ledger/postgres/seed.sql:/docker-entrypoint-initdb.d/2-seed.sql:ro
+      - ./ledger/postgres/readonly.sql:/docker-entrypoint-initdb.d/3-readonly.sql:ro
+    healthcheck:
+      test: ["CMD", "pg_isready", "-h", "127.0.0.1", "-U", "ledger", "-d", "ledger"]
+      interval: 2s
+      retries: 30
+
+  ledger-mysql:
+    image: mysql:8.4
+    environment:
+      MYSQL_ROOT_PASSWORD: root
+      MYSQL_DATABASE: ledger
+    volumes:
+      - ./ledger/mysql/schema.sql:/docker-entrypoint-initdb.d/1-schema.sql:ro
+      - ./ledger/mysql/seed.sql:/docker-entrypoint-initdb.d/2-seed.sql:ro
+      - ./ledger/mysql/readonly.sql:/docker-entrypoint-initdb.d/3-readonly.sql:ro
+    healthcheck:
+      test: ["CMD", "mysql", "-h", "127.0.0.1", "-u", "checks", "-pchecks", "-e", "select count(*) from ledger.ledger_postings"]
+      interval: 2s
+      retries: 60
+
   money-checks:
     build: ..
     environment:
@@ -76,13 +108,18 @@ services:
       APP_MONGO_URI: mongodb://checks:checks@mongo:27017/?authSource=app
       ANALYTICS_CLICKHOUSE_URL: http://checks:checks@clickhouse:8123/
       APP_MYSQL_DSN: checks:checks@tcp(mysql:3306)/app
+      LEDGER_PG_DSN: postgres://checks:checks@ledger-postgres:5432/ledger
+      LEDGER_MYSQL_DSN: checks:checks@tcp(ledger-mysql:3306)/ledger
     volumes:
       - ./postgres:/recipes/postgres:ro
       - ./mongodb:/recipes/mongodb:ro
       - ./clickhouse:/recipes/clickhouse:ro
       - ./mysql:/recipes/mysql:ro
+      - ./ledger:/recipes/ledger:ro
     depends_on:
       postgres: {condition: service_healthy}
       mongo: {condition: service_healthy}
       clickhouse: {condition: service_healthy}
       mysql: {condition: service_healthy}
+      ledger-postgres: {condition: service_healthy}
+      ledger-mysql: {condition: service_healthy}
