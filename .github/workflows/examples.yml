@@ -140,7 +140,7 @@ jobs:
       - uses: actions/checkout@v7
       - run: docker compose build
       - name: Every recipe catalog is valid without a database
-        run: for db in postgres mongodb clickhouse mysql; do docker compose run --rm -T money-checks validate -c /recipes/$db/checks.yaml; done
+        run: for db in postgres mongodb clickhouse mysql ledger/postgres ledger/mysql; do docker compose run --rm -T money-checks validate -c /recipes/$db/checks.yaml; done
       - name: PostgreSQL recipes find exactly the planted violations
         run: docker compose run --rm money-checks test -c /recipes/postgres/checks.yaml -t /recipes/postgres/tests.yaml
       - name: MongoDB recipes find exactly the planted violations
@@ -149,9 +149,13 @@ jobs:
         run: docker compose run --rm money-checks test -c /recipes/clickhouse/checks.yaml -t /recipes/clickhouse/tests.yaml
       - name: MySQL recipes find exactly the planted violations
         run: docker compose run --rm money-checks test -c /recipes/mysql/checks.yaml -t /recipes/mysql/tests.yaml
+      - name: Recipes for ianfoxdev/ledger find exactly the planted violations
+        run: |
+          docker compose run --rm money-checks test -c /recipes/ledger/postgres/checks.yaml -t /recipes/ledger/postgres/tests.yaml
+          docker compose run --rm money-checks test -c /recipes/ledger/mysql/checks.yaml -t /recipes/ledger/mysql/tests.yaml
       - name: Every recipe query has a plan, with the window and run
         run: |
-          for db in postgres mongodb clickhouse mysql; do
+          for db in postgres mongodb clickhouse mysql ledger/postgres ledger/mysql; do
             for flag in --window --analyze; do
               docker compose run --rm -T money-checks explain -c /recipes/$db/checks.yaml $flag > out.txt
               tail -n 1 out.txt
