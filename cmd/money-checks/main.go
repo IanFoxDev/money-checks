@@ -47,6 +47,14 @@ const usage = `usage:
       nothing; with --env the environment variables must be set too; 0 valid, 2 not
   money-checks serve -c checks.yaml
       run the checks now and every serve.interval; /metrics, /healthz, /readyz on serve.listen
+  money-checks history -f history.jsonl [--since 720h] [--check NAME] [--json]
+      read the history file of serve and print, per check, the violations found,
+      changed, back after a fix and fixed in the period, the open ones and the
+      median time to fix
+  money-checks diff -c new.yaml --old old.yaml [--check NAME] [--window]
+      run both versions of every check that differs between two configurations
+      against the same database and print the rows only one version finds and the
+      rows whose amount differs; 0 the same rows, 1 they differ, 2 a check failed
   money-checks known add -c checks.yaml --check NAME --reason TEXT [--until DATE] [--limit N]
       run one check and add its new violations to the known file
   money-checks test -c checks.yaml -t tests.yaml
@@ -78,6 +86,10 @@ func run(ctx context.Context, args []string, stdout, stderr io.Writer, open chec
 		return explainChecks(ctx, args[1:], stdout, stderr, open, now)
 	case "validate":
 		return validateChecks(args[1:], stdout, stderr)
+	case "history":
+		return historyReport(args[1:], stdout, stderr, now)
+	case "diff":
+		return diffChecks(ctx, args[1:], stdout, stderr, open, now)
 	case "serve":
 		return serveChecks(ctx, args[1:], stderr, open, now)
 	case "test":
