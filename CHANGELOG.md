@@ -8,6 +8,8 @@ configuration, the report format or the metric names; such changes are marked
 
 ## [Unreleased]
 
+## [0.9.0] - 2026-11-25
+
 ### Added
 
 - `serve` remembers a violation for 90 days after a full run stopped finding it. Found
@@ -23,7 +25,6 @@ configuration, the report format or the metric names; such changes are marked
 - `money-checks diff -c NEW --old OLD`: runs both versions of every check that differs
   between two configurations and prints the rows only one of them finds and the rows
   whose amount differs, for the review of a change to a check.
-
 - `recipes/ledger`: five checks for the tables of `ianfoxdev/ledger` in PostgreSQL and
   MySQL (unbalanced transaction, broken balance chain, sequence gap, negative balance,
   expired credit lot that was not expired), tested in CI.
@@ -315,7 +316,8 @@ CI, with the database tests required to run.
 - `show` and `mask` for the columns a report may contain.
 - Docker image and the example in `examples/subscriptions`.
 
-[Unreleased]: https://github.com/IanFoxDev/money-checks/compare/v0.8.2...HEAD
+[Unreleased]: https://github.com/IanFoxDev/money-checks/compare/v0.9.0...HEAD
+[0.9.0]: https://github.com/IanFoxDev/money-checks/compare/v0.8.2...v0.9.0
 [0.8.2]: https://github.com/IanFoxDev/money-checks/compare/v0.8.1...v0.8.2
 [0.8.1]: https://github.com/IanFoxDev/money-checks/compare/v0.8.0...v0.8.1
 [0.8.0]: https://github.com/IanFoxDev/money-checks/compare/v0.7.0...v0.8.0
