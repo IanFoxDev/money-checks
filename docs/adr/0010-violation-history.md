@@ -1,6 +1,6 @@
 # 0010. serve keeps a history of violations, and a changed check is compared, not alerted
 
-Date: 2026-11-25. Status: proposed.
+Date: 2026-11-25. Status: accepted.
 
 ## Context
 
@@ -55,6 +55,9 @@ violation:**
   run, so the file grows with what happens, not with how often `serve` runs.
 - `version` is the version of the check, below, so a person can see which query
   found a row.
+- A file that does not exist yet starts with a `baseline` of every violation the
+  state file holds, at the time each was first seen, so the history knows what is
+  open from its first line.
 - The file holds ids and amounts, as the state file and the CSV do. It is created
   with mode 0600 and belongs next to the state file, not in the repository of the
   configuration.
@@ -73,7 +76,7 @@ violation:**
 seen and the time it was fixed.** An id that a run finds again in that time is
 `regressed`, and the message says so:
 
-> double_charge: 1 violation came back (9.99 EUR), fixed 6 days ago; 151 in all [error]
+> double_charge: 1 violation came back (9.99 EUR), fixed 6 days ago, 151 in all [error]
 
 Regressions are posted even when the check also has new violations, in their own
 line. `money_check_regressed_violations_total{check}` counts them.
@@ -85,10 +88,13 @@ file gets version 2; serve reads a version 1 file as before, with no fixed ids.
 ### The version of a check
 
 **Each check gets a version: a hash of everything that decides which rows it
-returns and how they are read.** That is the query or pipeline, the collection, the
-`compare` sides, `key`, the column of the id and of the amount, `window`, `settle`
-and the source kind. Not the description, the schedule, `show`, `mask` or the
-known file: they change what a report shows, not what the check finds.
+returns and how they are read.** That is the query or pipeline without its
+comments, the collection, the `compare` sides, `key`, `counts`, `tolerance_minor`,
+the column of the id and of the amount, `settle` and the kind of the source. Not
+the description, the schedule, `window`, `show`, `mask`, `expect` or the known
+file: they change when a check runs or what a report shows, not what a full run
+finds. A window that grows from 3h to 7h is not a new version; a query that reads
+one more column is, and its baseline that finds no other row posts nothing.
 
 The state keeps the version of the last full run. When the first full run after a
 start finds that the version changed, that run is a baseline and is not alerted row
@@ -97,7 +103,7 @@ by row:
 - rows the old version did not find are `baseline`, not `new`;
 - rows it no longer finds are `dropped`, not `fixed`;
 - rows both versions find keep their first seen;
-- one message says what the change did:
+- one message says what the change did, or none when no row changed:
 
 > double_charge changed: 151 violations, 12 found for the first time, 3 no longer found
 
@@ -106,13 +112,14 @@ run is `baseline`. The message of a first run (0006) stays as it is, and the his
 then says that these rows were found in old data, not on the day they were posted.
 
 The baseline needs a full run because a window run sees only its window: a row
-outside it is neither found nor dropped. serve starts with a full run, and a change
+outside it is neither found nor dropped. A window run of a changed check before
+it posts nothing and changes nothing. serve starts with a full run, and a change
 of the configuration needs a restart, so the first run after a change is the
 baseline.
 
 ### history
 
-**`money-checks history FILE` reads a history file and prints, for each check:**
+**`money-checks history -f FILE` reads a history file and prints, for each check:**
 
 - violations found, fixed, regressed and dropped in the period;
 - violations open at the end of it, and the oldest of them;
@@ -130,9 +137,12 @@ deciding which check to fix or drop and which to write next.
 two configurations, both versions against the same database, and prints the rows
 only the old version finds, the rows only the new one finds, and the rows whose
 amount differs.** `--check NAME` limits it to one check, `--window` runs both with
-the window. Rows are read as `run --check --csv` reads them, with `show` and `mask`
-of the new version. The exit code is 0 when both versions find the same rows, 1
-when they differ and 2 when a check fails, as `diff(1)` does.
+the window, from the same start. A check that is only in one configuration is
+listed as new or removed, with its rows. The output is ids and amounts, as the log
+of `serve` has them; `--limit` caps each list. The known file is left out: it
+accepts rows, it does not change what a check finds. The exit code is 0 when both
+versions find the same rows, 1 when they differ and 2 when a check fails, as
+`diff(1)` does.
 
 `diff` is for the review of a change to a check: the author runs it against a copy
 of production, or off peak against a replica, and the rows go with the change.

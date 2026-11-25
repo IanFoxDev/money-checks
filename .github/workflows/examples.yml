@@ -52,10 +52,10 @@ jobs:
           curl -s 127.0.0.1:8080/metrics > metrics.txt
           grep -x 'money_check_violations{check="unbalanced_transactions",scope="full",severity="error"} 3' metrics.txt
           grep -x 'money_check_amount_minor_units{check="payments_reach_stats",currency="USD",scope="full"} 11399' metrics.txt
-      - name: serve with a state file posts only what is new
+      - name: serve with a state file posts only what is new, and keeps a history
         run: |
           docker compose stop money-checks
-          { cat checks.yaml; printf 'serve:\n  state_file: /out/state.json\n'; } > out/serve.yaml
+          { cat checks.yaml; printf 'serve:\n  state_file: /out/state.json\n  history_file: /out/history.jsonl\n'; } > out/serve.yaml
           serve() {
             # One start of serve: wait for its first run, stop it, keep the log.
             MC_UID=$(id -u) MC_GID=$(id -g) docker compose run -d --name mc-state money-checks \
@@ -87,6 +87,12 @@ jobs:
           serve third
           if grep -q '"msg":"state changed"' out/third.log; then exit 1; fi
           test "$(stat -c %a out/state.json)" = 600
+          # The history: a baseline of the first start, then the one new violation.
+          test "$(stat -c %a out/history.jsonl)" = 600
+          test "$(grep -c '"event":"new"' out/history.jsonl)" -eq 1
+          grep '"event":"new"' out/history.jsonl | grep -q 'two_renewals_in_one_period.*sub_d' || { cat out/history.jsonl; exit 1; }
+          MC_UID=$(id -u) MC_GID=$(id -g) docker compose run --rm money-checks history -f /out/history.jsonl | tee out/history.txt
+          grep -Eq '^ +two_renewals_in_one_period +1 +0 +0 +0 +2 ' out/history.txt
       - name: A database that goes away is one line, and one when it is back
         run: |
           { cat checks.yaml; printf 'serve:\n  interval: 1m\n  retry: 10s\n  state_file: /out/down.json\n'; } > out/down.yaml

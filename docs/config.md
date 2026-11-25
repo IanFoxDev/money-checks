@@ -448,6 +448,7 @@ serve:
   retry: 1m                # default 1m (or interval, if shorter), from 10s to interval, below
   listen: ":8080"          # default :8080
   state_file: state.json  # optional: what serve has seen survives a restart, below
+  history_file: history.jsonl  # optional: a line for every change of a violation, below
   slack:
     webhook_env: SLACK_WEBHOOK_URL
 ```
@@ -530,6 +531,66 @@ cannot read, or of another version, is a warning, and `serve` starts as without 
 Checks that are no longer in the configuration are dropped from it. Run one `serve`
 per state file.
 
+A violation that a full run stopped finding is remembered for 90 days. Found again
+in that time, it came back, and gets a line of its own next to the new ones:
+
+```
+money-checks: 1 check changed
+refund_exceeds_payment found 1 new violation (30.00 USD), 14 in all [error]
+refund_exceeds_payment: 1 violation came back (49.00 USD), fixed 6 days ago, 14 in all [error]
+```
+
+It is counted in `money_check_regressed_violations_total{check}`, not in
+`money_check_new_violations_total`. After 90 days the id is new again.
+
+Each check has a version: a hash of the kind of its source, its query or pipeline
+(without comments), collection, `id`, `amount` and `settle`, and for a `compare`
+check of both sides, `key`, `counts` and `tolerance_minor`. The description, the
+schedule, `window`, `show`, `mask`, `expect` and the known file are not part of it:
+they change when a check runs or what a report shows, not what a full run finds.
+The state file keeps the version of the last full run. The first full run of
+another version, which is the run at start after a deploy, is a baseline: the rows
+the old version did not find are not new, the rows it no longer finds are not
+fixed, the rows both find keep their age, and one line says what the change did,
+or none when it changed no row:
+
+```
+money-checks: refund_exceeds_payment changed: 12 violations, 1 found for the first time, 3 no longer found [error]
+```
+
+A window run of a changed check before that full run posts nothing: it cannot see
+what the change dropped. Run `diff` before the change, below, to see the rows.
+
+With `history_file`, `serve` appends a line of JSON for every change of a violation
+it tracks, before it writes the state file:
+
+```json
+{"time":"2026-11-25T10:00:03Z","check":"refund_exceeds_payment","id":"pay_412","event":"new","scope":"window","amount":{"currency":"USD","minor":3000,"exponent":2},"version":"9e04f7c2"}
+```
+
+| `event` | |
+|---|---|
+| `new` | an id not tracked before |
+| `changed` | a tracked id with another amount |
+| `fixed` | an id a full run no longer finds |
+| `regressed` | an id fixed in the last 90 days and found again |
+| `baseline` | an id found by the first full run of a new or changed check |
+| `dropped` | an id a changed check no longer finds |
+
+- Only changes are written: a violation open for a month is one line.
+- A file that does not exist yet starts with a `baseline` of every violation in the
+  state file, at the time `serve` first saw each, so the history knows what is open
+  from its first line. `serve` does not start when it cannot write the file.
+- A crash between the history and the state file writes the events of that run
+  again; `history` takes repeated events as one.
+- The file holds ids and amounts and is created with mode 0600. `serve` does not
+  rotate it: at about 200 bytes a line, a hundred thousand events are 20 MB. It is
+  JSON Lines, for `money-checks history` or any store that loads it.
+- A relative path is relative to the configuration file; it cannot be the state
+  file.
+
+Why: [adr/0010-violation-history.md](adr/0010-violation-history.md).
+
 ## known_file
 
 Violations someone has looked at and accepted: a double charge that support refunded
@@ -580,6 +641,8 @@ money-checks validate -c checks.yaml [--without-known] [--env]
 money-checks serve -c checks.yaml
 money-checks known add -c checks.yaml --check NAME --reason TEXT [--until DATE] [--limit N]
 money-checks test -c checks.yaml -t tests.yaml
+money-checks diff -c checks.yaml --old old.yaml [--check NAME] [--window] [--limit N]
+money-checks history -f history.jsonl [--since 720h] [--check NAME] [--json]
 money-checks version
 ```
 
@@ -672,6 +735,24 @@ leaves out the known file, kept as a secret elsewhere; `--env` also requires eve
 environment variable of the sources and of Slack, the check before a deploy where
 the secrets are. Warnings go to stderr. Exit code 0 when the configuration is
 valid, 2 when it is not.
+
+`diff` runs the checks whose version differs between two configurations, the old
+version from `--old` and the new from `-c`, against the same database, and prints
+for each the rows only the old version finds, the rows only the new one finds and
+the rows whose amount differs. A check only in one of them is listed as new or
+removed, with its rows. `--check` runs one check, also when it did not change;
+`--window` runs both versions with the window, from the same start; `--limit`
+caps each list (50 by default, 0 for every id). The known file is not read: it
+accepts rows, it does not change what a check finds. Both versions read every row,
+so run `explain` on the new one first. Exit code 0 when both versions find the
+same rows, 1 when they differ, 2 when a check failed.
+
+`history` reads the history file of `serve` and prints, per check, the events of
+the period (`--since`, 30 days by default, up to now): violations new, changed,
+come back and fixed, the open ones at the end and how long ago the oldest of them
+was found, and the median time from found to fixed. Then the baseline of each
+version of a check in the period. `--json` gives the same numbers, with the time
+to fix in seconds. It connects to nothing and needs no configuration.
 
 `test` runs the checks a tests file lists and compares what they find with what
 they must find, below. Exit code 0 when every test passes, 1 when one does not, 2

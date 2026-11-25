@@ -99,6 +99,7 @@ against a staging copy.
 | `money_check_errors_total` | `check` | runs that failed |
 | `money_check_expect_value` | `check`, `scope`, `side` | the number the `expect` query found, below |
 | `money_check_new_violations_total` | `check` | violations `serve` had not seen before, or saw with another amount |
+| `money_check_regressed_violations_total` | `check` | violations found again within 90 days after a full run stopped finding them |
 | `money_check_oldest_violation_age_seconds` | `check` | how long ago `serve` first saw the oldest violation the check still finds |
 | `money_check_interval_seconds` | `check` | how often `serve` runs the check: its `every`, or `serve.interval` |
 | `money_check_source_up` | `source` | 1 if the source answered in the last run that used it, 0 if it could not be reached |
@@ -144,6 +145,8 @@ changed in one run is one message, a line per check. A database that cannot be
 reached is one line for all its checks, and one more when it is back. Messages carry the check
 name, the count and the totals, never rows. `serve.state_file` keeps what
 `serve` has seen across restarts, so a deploy does not post everything again.
+A violation that comes back after a fix, and a check that was changed, get lines
+of their own, below.
 
 ## Read the last day, not the whole table
 
@@ -300,6 +303,62 @@ with fifty million rows.
 
 Why it works this way: `docs/adr/0009-explain.md`.
 
+## When a check changes, and what comes back
+
+Checks get better after they meet real data: a false positive is left out, a case
+they missed is added. Each change shows its rows before it is merged. `diff` runs
+the old and the new version of every check that differs between two configurations
+against the same database, a copy of production or a replica off peak:
+
+```
+$ money-checks diff -c checks.yaml --old checks.main.yaml
+refund_exceeds_payment: version 5d1c09ab -> 9e04f7c2: 14 rows before, 12 rows now; 3 only old, 1 only new, 0 with another amount
+  only old (the new version hides them):
+    pay_208 49.00 USD
+    pay_311 12.50 USD
+    pay_377 12.50 USD
+  only new:
+    pay_412 30.00 USD
+```
+
+Hiding rows is the change that most needs a reason, and the review sees which ones.
+The exit code is 0 for the same rows, 1 when they differ and 2 when a check failed.
+
+Once merged, `serve` knows the check changed: each check has a version, a hash of
+what decides its rows, and the first full run of a new version posts one line
+instead of a list of rows that did not appear or disappear today:
+
+```
+money-checks: refund_exceeds_payment changed: 12 violations, 1 found for the first time, 3 no longer found [error]
+```
+
+A fix that does not hold is worse news than a new case: the ticket is closed. A
+violation that a full run stopped finding and that is found again within 90 days
+is posted as one that came back, not as new:
+
+```
+money-checks: refund_exceeds_payment: 1 violation came back (49.00 USD), fixed 6 days ago, 13 in all [error]
+```
+
+With `serve.history_file`, every change of a violation is a line of JSON: new,
+changed, fixed, regressed, and baseline and dropped for a changed check. `history`
+reads it and says which checks find bugs and which only noise:
+
+```
+$ money-checks history -f history.jsonl --since 720h
+2026-10-26 09:00 to 2026-11-25 09:00 UTC, 412 events
+
+                     check  new  changed  came back  fixed  open  oldest open  median to fix
+    refund_exceeds_payment    9        1          1      7    13          41d            50h
+  two_active_subscriptions   31        0          0     31     0            -             3h
+```
+
+`--json` gives the same numbers to a script, or to an assistant that proposes
+changes for a person to review. The history holds ids and amounts, as the CSV of
+`run`, and grows with what happens, not with how often `serve` runs.
+
+Why it works this way: `docs/adr/0010-violation-history.md`.
+
 ## Known violations
 
 The first run against a real database usually finds old rows that were looked at
@@ -440,7 +499,7 @@ The full configuration: [docs/config.md](docs/config.md).
 
 ## Not yet
 
-A history of violations and an MCP mode so an assistant can run the same named queries. If you need one of these
+An MCP mode so an assistant can run the same named queries. If you need one of these
 first, open an issue.
 
 ## Contributing

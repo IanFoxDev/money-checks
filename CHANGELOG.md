@@ -10,9 +10,31 @@ configuration, the report format or the metric names; such changes are marked
 
 ### Added
 
+- `serve` remembers a violation for 90 days after a full run stopped finding it. Found
+  again, it is posted as one that came back ("1 violation came back (9.99 EUR), fixed
+  6 days ago"), not as new, and counted in `money_check_regressed_violations_total`.
+- Each check has a version, a hash of what decides its rows. The first full run of
+  a changed or new check is a baseline: one line, "changed: 12 violations, 1 found
+  for the first time, 3 no longer found", instead of rows posted as new and fixed.
+- `serve.history_file`: a line of JSON for every change of a violation (new, changed,
+  fixed, regressed, baseline, dropped).
+- `money-checks history -f FILE`: per check, the violations found, changed, back and
+  fixed in a period, the open ones and the median time to fix; `--json`.
+- `money-checks diff -c NEW --old OLD`: runs both versions of every check that differs
+  between two configurations and prints the rows only one of them finds and the rows
+  whose amount differs, for the review of a change to a check.
+
 - `recipes/ledger`: five checks for the tables of `ianfoxdev/ledger` in PostgreSQL and
   MySQL (unbalanced transaction, broken balance chain, sequence gap, negative balance,
   expired credit lot that was not expired), tested in CI.
+
+### Changed
+
+- The state file of `serve` is version 2: it keeps the version of each check and the
+  fixed violations. Version 1 is read as before; an older `serve` reads version 2 as
+  unreadable and starts without it.
+- A Slack message with several lines counts the checks that changed, not the lines:
+  a check can now have two, its new violations and the ones that came back.
 
 ## [0.8.2] - 2026-11-05
 
