@@ -62,7 +62,7 @@ func TestStateFileUnreadable(t *testing.T) {
 	dir := t.TempDir()
 	for name, body := range map[string]string{
 		"broken.json":  `{"version": 1, "checks": {`,
-		"version.json": `{"version": 2, "checks": {"two_active_subscriptions": {"complete": true, "found": {"full": true}}}}`,
+		"version.json": `{"version": 3, "checks": {"two_active_subscriptions": {"complete": true, "found": {"full": true}}}}`,
 	} {
 		path := filepath.Join(dir, name)
 		if err := os.WriteFile(path, []byte(body), 0o600); err != nil {

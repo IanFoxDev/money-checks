@@ -301,11 +301,11 @@ func TestMessageLimit(t *testing.T) {
 	for i := range lines {
 		lines[i] = "c" + itoa(int64(i)) + " failed: x"
 	}
-	got := strings.Split(message(sourceNews{}, lines), "\n")
+	got := strings.Split(message(sourceNews{}, lines, len(lines)), "\n")
 	if len(got) != maxLines+2 || got[0] != "money-checks: 22 checks changed" || got[maxLines] != "c19 failed: x" || got[maxLines+1] != "and 2 more" {
 		t.Errorf("%q", got)
 	}
-	if got := message(sourceNews{}, lines[:1]); got != "money-checks: c0 failed: x" {
+	if got := message(sourceNews{}, lines[:1], 1); got != "money-checks: c0 failed: x" {
 		t.Errorf("one line: %q", got)
 	}
 }
@@ -491,16 +491,16 @@ func TestNewKeysOfCompare(t *testing.T) {
 	d := func(minor int64) *check.Money { return &check.Money{Currency: "USD", Minor: minor, Exponent: 2} }
 	now := time.Unix(1791400000, 0)
 	res.Violations = 2
-	st.change(res, &rows{ids: map[string]*check.Money{"d1": d(-500), "d2": d(100)}}, now)
+	st.change(res, &rows{ids: map[string]*check.Money{"d1": d(-500), "d2": d(100)}}, "v1", now)
 	res.Violations = 2
-	msg, added := st.change(res, &rows{ids: map[string]*check.Money{"d1": d(-800), "d2": d(100)}}, now)
-	if want := "daily found 1 new key where billing and stats differ (8.00 USD), 2 in all [error]"; msg != want || len(added) != 1 {
-		t.Errorf("%q %v", msg, added)
+	out := st.change(res, &rows{ids: map[string]*check.Money{"d1": d(-800), "d2": d(100)}}, "v1", now)
+	if want := "daily found 1 new key where billing and stats differ (8.00 USD), 2 in all [error]"; strings.Join(out.lines, "\n") != want || len(out.added) != 1 {
+		t.Errorf("%q %v", out.lines, out.added)
 	}
 	res.Violations = 1
-	msg, _ = st.change(res, &rows{ids: map[string]*check.Money{"d1": d(-800)}}, now)
-	if want := "daily: 1 key no longer differs (1.00 USD), 1 left [error]"; msg != want {
-		t.Errorf("%q", msg)
+	out = st.change(res, &rows{ids: map[string]*check.Money{"d1": d(-800)}}, "v1", now)
+	if want := "daily: 1 key no longer differs (1.00 USD), 1 left [error]"; strings.Join(out.lines, "\n") != want {
+		t.Errorf("%q", out.lines)
 	}
 }
 
@@ -654,7 +654,7 @@ func TestSourceDownAndBack(t *testing.T) {
 // Sources come first and are counted in the first line; a long error is cut.
 func TestMessageWithSources(t *testing.T) {
 	src := sourceNews{lines: []string{"source stats is down, 4 checks did not run: x"}, down: 1}
-	got := message(src, []string{"two_active_subscriptions found 1 new violation (5.00 EUR), 2 in all [error]"})
+	got := message(src, []string{"two_active_subscriptions found 1 new violation (5.00 EUR), 2 in all [error]"}, 1)
 	want := "money-checks: 1 check changed, 1 source down\n" +
 		"source stats is down, 4 checks did not run: x\n" +
 		"two_active_subscriptions found 1 new violation (5.00 EUR), 2 in all [error]"

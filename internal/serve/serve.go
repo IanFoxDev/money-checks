@@ -20,6 +20,7 @@ import (
 
 	"github.com/ianfoxdev/money-checks/internal/check"
 	"github.com/ianfoxdev/money-checks/internal/config"
+	"github.com/ianfoxdev/money-checks/internal/history"
 )
 
 // Server holds the state between runs.
@@ -66,6 +67,32 @@ type state struct {
 	// the check is news only when its state changes.
 	seen     map[string]violation
 	complete bool
+	// version is the version of the check that made the last full run, "" before
+	// it or in a state file written before versions.
+	version string
+	// fixed are the ids that a full run stopped finding in the last keepFixed,
+	// so an id found again is regressed, not new.
+	fixed map[string]fixedViolation
+}
+
+// keepFixed is how long serve remembers a fixed violation. See
+// docs/adr/0010-violation-history.md.
+const keepFixed = 90 * 24 * time.Hour
+
+// fixedViolation is what serve remembers of a fixed violation.
+type fixedViolation struct {
+	amount *check.Money
+	first  time.Time
+	at     time.Time
+}
+
+// outcome is what one run of a check changed: the lines to post, the ids that
+// are new or changed, the ids that came back and the events for the history.
+type outcome struct {
+	lines     []string
+	added     []string
+	regressed int
+	events    []history.Event
 }
 
 // violation is what serve remembers of one violation.
@@ -194,6 +221,8 @@ func (s *Server) run(ctx context.Context, cfg config.Config, scope check.Scope) 
 	}
 	s.metrics.runs.Inc()
 	var lines []string
+	var events []history.Event
+	changed := 0
 	for i, res := range r.Results {
 		if res.SourceDown != "" {
 			if s.pending[res.Name] != check.Full {
@@ -221,28 +250,32 @@ func (s *Server) run(ctx context.Context, cfg config.Config, scope check.Scope) 
 		if got != nil && got.over && st.complete {
 			s.log.Warn("too many violations to tell the new ones; the check is news only when its state changes", "check", res.Name, "limit", maxTracked)
 		}
-		tracked := st.complete
-		msg, added := st.change(res, got, s.now())
+		out := st.change(res, got, s.cfg.CheckVersion(cfg.Checks[i]), s.now())
 		if res.Status != check.StatusFailed {
-			// The first full picture is not news: its violations are not new.
-			n := 0
-			if tracked && st.complete {
-				n = len(added)
-			}
-			s.metrics.track(res.Name, st, n, s.now())
+			s.metrics.track(res.Name, st, len(out.added), out.regressed, s.now())
 		}
-		// The first full picture lists no ids: they are every violation, not news.
-		if len(added) > 0 && tracked {
-			s.log.Info("new violations", "check", res.Name, "count", len(added), "ids", first(added, *cfg.Checks[i].Samples))
+		if len(out.added) > 0 {
+			s.log.Info("new violations", "check", res.Name, "count", len(out.added), "ids", first(out.added, *cfg.Checks[i].Samples))
 		}
-		if msg != "" {
+		for _, msg := range out.lines {
 			s.log.Info("state changed", "check", res.Name, "message", msg)
-			lines = append(lines, msg)
+		}
+		if len(out.lines) > 0 {
+			changed++
+		}
+		lines = append(lines, out.lines...)
+		events = append(events, out.events...)
+	}
+	// Before the state file: a crash between the two writes the events again,
+	// which the reader takes as one, instead of losing them.
+	if path := s.cfg.Serve.HistoryFile; path != "" && len(events) > 0 {
+		if err := history.Append(path, events); err != nil {
+			s.log.Error("the history file cannot be written", "file", path, "error", err)
 		}
 	}
 	news := s.sources(r.Results)
 	if len(news.lines)+len(lines) > 0 {
-		msg := message(news, lines)
+		msg := message(news, lines, changed)
 		s.log.Info("message", "lines", len(news.lines)+len(lines), "text", msg)
 		if s.notify != nil {
 			if err := s.notify.Notify(ctx, msg); err != nil {
@@ -277,6 +310,11 @@ func (s *Server) Run(ctx context.Context) error {
 		s.load()
 		if err := s.save(); err != nil {
 			return fmt.Errorf("serve.state_file: %w", err)
+		}
+	}
+	if path := s.cfg.Serve.HistoryFile; path != "" {
+		if err := s.startHistory(); err != nil {
+			return fmt.Errorf("serve.history_file: %w", err)
 		}
 	}
 	var lc net.ListenConfig
@@ -323,18 +361,21 @@ func (s *Server) Run(ctx context.Context) error {
 	}
 }
 
-// change records res and says the line to post about it, or "", and which ids are
-// new. The first run only reports problems; a check that is fine from the start
-// is not news. Then every new violation is news, an id not seen before or one
-// whose amount changed, also when the check already had violations. Only a full
-// run says that violations are gone: a row that leaves the window is not fixed.
-func (st *state) change(res check.Result, got *rows, now time.Time) (string, []string) {
+// change records res and says what to post about it, which ids are new and
+// what to write to the history. The first run only reports problems; a check
+// that is fine from the start is not news. Then every new violation is news, an
+// id not seen before or one whose amount changed, also when the check already
+// had violations, and an id fixed before that is found again has a line of its
+// own. Only a full run says that violations are gone: a row that leaves the
+// window is not fixed. The first full run of a changed check is a baseline:
+// one line says what the change did. See docs/adr/0010-violation-history.md.
+func (st *state) change(res check.Result, got *rows, version string, now time.Time) outcome {
 	if res.Status == check.StatusFailed {
 		if st.failed {
-			return "", nil
+			return outcome{}
 		}
 		st.failed = true
-		return res.Name + " failed: " + cut(res.Error), nil
+		return outcome{lines: []string{res.Name + " failed: " + cut(res.Error)}}
 	}
 	wasFailed, had := st.failed, st.found[res.Scope]
 	found := res.Status == check.StatusViolations
@@ -343,22 +384,68 @@ func (st *state) change(res check.Result, got *rows, now time.Time) (string, []s
 		got = &rows{}
 	}
 	if got.over {
-		st.seen, st.complete = nil, false
-		return stateChange(res, wasFailed, had, found), nil
+		st.seen, st.complete, st.fixed = nil, false, nil
+		return outcome{lines: lines(stateChange(res, wasFailed, had, found))}
+	}
+	event := func(id, kind string, a *check.Money) history.Event {
+		return history.Event{Time: now, Check: res.Name, ID: id, Event: kind, Scope: string(res.Scope), Amount: amount(a), Version: version}
+	}
+	for id, f := range st.fixed {
+		if now.Sub(f.at) > keepFixed {
+			delete(st.fixed, id)
+		}
+	}
+	if st.complete && st.version == "" {
+		// A state file from before versions: the check is taken as unchanged.
+		st.version = version
+	}
+	if st.complete && st.version != version {
+		if res.Scope == check.Window {
+			// A window cannot tell what the change dropped: wait for a full run.
+			return outcome{}
+		}
+		return st.baseline(res, got, version, now, event)
 	}
 
+	var out outcome
 	var added []string
-	var addedSums, fixedSums []check.Money
-	fixed := 0
+	var addedSums, fixedSums, backSums []check.Money
+	var back []string
 	for id, a := range got.ids {
-		if v, ok := st.seen[id]; !ok || !same(v.amount, a) {
-			added = append(added, id)
+		v, ok := st.seen[id]
+		switch {
+		case ok && same(v.amount, a):
+			continue
+		case ok:
+			out.events = append(out.events, event(id, history.Changed, a))
+		case !st.fixed[id].at.IsZero():
+			back = append(back, id)
 			if a != nil {
-				addedSums = append(addedSums, *a)
+				backSums = append(backSums, *a)
 			}
+			continue
+		default:
+			out.events = append(out.events, event(id, history.New, a))
+		}
+		added = append(added, id)
+		if a != nil {
+			addedSums = append(addedSums, *a)
 		}
 	}
 	sort.Strings(added)
+	sort.Strings(back)
+	var since, until time.Time // of the fixes that came back
+	for _, id := range back {
+		f := st.fixed[id]
+		if since.IsZero() || f.at.Before(since) {
+			since = f.at
+		}
+		if f.at.After(until) {
+			until = f.at
+		}
+		delete(st.fixed, id)
+		out.events = append(out.events, event(id, history.Regressed, got.ids[id]))
+	}
 	next := st.seen
 	if res.Scope == check.Full || next == nil {
 		next = map[string]violation{}
@@ -371,6 +458,7 @@ func (st *state) change(res check.Result, got *rows, now time.Time) (string, []s
 		v.amount = a
 		next[id] = v
 	}
+	fixed := 0
 	if res.Scope == check.Full {
 		for id, v := range st.seen {
 			if _, ok := got.ids[id]; !ok {
@@ -378,43 +466,162 @@ func (st *state) change(res check.Result, got *rows, now time.Time) (string, []s
 				if v.amount != nil {
 					fixedSums = append(fixedSums, *v.amount)
 				}
+				if st.complete {
+					if st.fixed == nil {
+						st.fixed = map[string]fixedViolation{}
+					}
+					st.fixed[id] = fixedViolation{amount: v.amount, first: v.first, at: now}
+					out.events = append(out.events, event(id, history.Fixed, v.amount))
+				}
 			}
 		}
 	}
 	complete := st.complete
 	st.seen, st.complete = next, complete || res.Scope == check.Full
-
-	// Before a full picture, or when every violation is new, the state change
-	// says it all. After a failure the violations seen before are still known,
-	// so only what changed meanwhile is news. See
-	// docs/adr/0007-source-down-one-message.md.
-	if !complete || !wasFailed && len(added) == int(res.Violations) && fixed == 0 {
-		return stateChange(res, wasFailed, had, found), added
+	if !complete {
+		// The first full picture: every violation is found in old data, not
+		// today, and none is news.
+		out.events = nil
+		if res.Scope == check.Full {
+			st.version = version
+			ids := make([]string, 0, len(got.ids))
+			for id := range got.ids {
+				ids = append(ids, id)
+			}
+			sort.Strings(ids)
+			for _, id := range ids {
+				out.events = append(out.events, event(id, history.Baseline, got.ids[id]))
+			}
+		}
+		out.lines = lines(stateChange(res, wasFailed, had, found))
+		return out
 	}
-	if wasFailed {
+	sortEvents(out.events)
+	out.added, out.regressed = added, len(back)
+	backLine := ""
+	if len(back) > 0 {
+		backLine = cameBack(res, len(back), backSums, now.Sub(until), now.Sub(since))
+	}
+
+	// When every violation is new, the state change says it all. After a
+	// failure the violations seen before are still known, so only what changed
+	// meanwhile is news. See docs/adr/0007-source-down-one-message.md.
+	var line string
+	switch {
+	case !wasFailed && len(added) == int(res.Violations) && fixed == 0:
+		line = stateChange(res, wasFailed, had, found)
+	case wasFailed:
 		switch {
 		case !found:
-			return res.Name + " runs again and finds no violations", added
+			line = res.Name + " runs again and finds no violations"
+		case len(added) == 0 && fixed == 0 && len(back) > 0:
 		case len(added) == 0 && fixed == 0:
-			msg := res.Name + " runs again, no new " + noun(res, 2)
+			line = res.Name + " runs again, no new " + noun(res, 2)
 			if res.Scope == check.Window {
-				return msg + " in the last " + check.Span(res.Window) + " [" + res.Severity + "]", nil
+				line += " in the last " + check.Span(res.Window) + " [" + res.Severity + "]"
+			} else {
+				line += ", " + itoa(res.Violations) + " in all [" + res.Severity + "]"
 			}
-			return msg + ", " + itoa(res.Violations) + " in all [" + res.Severity + "]", nil
+		default:
+			line = news(res, added, addedSums, fixed, fixedSums)
+			if rest, ok := strings.CutPrefix(line, res.Name+":"); ok {
+				line = res.Name + " runs again:" + rest
+			} else {
+				line = res.Name + " runs again and" + strings.TrimPrefix(line, res.Name)
+			}
 		}
-		line := news(res, added, addedSums, fixed, fixedSums)
-		if rest, ok := strings.CutPrefix(line, res.Name+":"); ok {
-			return res.Name + " runs again:" + rest, added
+	case len(added) == 0 && fixed == 0:
+	case !found:
+		line = res.Name + " no longer finds violations"
+	default:
+		line = news(res, added, addedSums, fixed, fixedSums)
+	}
+	out.lines = lines(line, backLine)
+	return out
+}
+
+// baseline is the first full run of a changed check: the rows it finds that the
+// old version did not are found in old data, the rows it no longer finds are
+// dropped, not fixed, and one line says what the change did, or none when it
+// changed no row. The rows both versions find keep their first seen.
+func (st *state) baseline(res check.Result, got *rows, version string, now time.Time, event func(string, string, *check.Money) history.Event) outcome {
+	var out outcome
+	next := make(map[string]violation, len(got.ids))
+	for id, a := range got.ids {
+		v, ok := st.seen[id]
+		if !ok {
+			v.first = now
+			out.events = append(out.events, event(id, history.Baseline, a))
 		}
-		return res.Name + " runs again and" + strings.TrimPrefix(line, res.Name), added
+		v.amount = a
+		next[id] = v
+		delete(st.fixed, id)
 	}
-	if len(added) == 0 && fixed == 0 {
-		return "", nil
+	firstTime := len(out.events)
+	for id, v := range st.seen {
+		if _, ok := got.ids[id]; !ok {
+			out.events = append(out.events, event(id, history.Dropped, v.amount))
+		}
 	}
-	if !found {
-		return res.Name + " no longer finds violations", nil
+	dropped := len(out.events) - firstTime
+	sortEvents(out.events)
+	st.seen, st.version = next, version
+	if firstTime+dropped > 0 {
+		out.lines = []string{res.Name + " changed: " + itoa(res.Violations) + " " + noun(res, int(res.Violations)) +
+			", " + itoa(int64(firstTime)) + " found for the first time, " + itoa(int64(dropped)) + " no longer found [" + res.Severity + "]"}
 	}
-	return news(res, added, addedSums, fixed, fixedSums), added
+	return out
+}
+
+// cameBack is the line about violations that were fixed and are found again,
+// with how long ago they were fixed.
+func cameBack(res check.Result, n int, ms []check.Money, latest, earliest time.Duration) string {
+	msg := res.Name + ": " + itoa(int64(n)) + " " + noun(res, n) + " came back" + sums(ms, res.RightSource != "") + ", fixed "
+	if a, b := ago(latest), ago(earliest); a != b {
+		msg += a + " to " + b + " ago"
+	} else {
+		msg += a + " ago"
+	}
+	if res.Scope == check.Full {
+		msg += ", " + itoa(res.Violations) + " in all"
+	}
+	return msg + " [" + res.Severity + "]"
+}
+
+// ago is a duration as a message says it: hours up to two days, then days.
+func ago(d time.Duration) string {
+	switch h := int64(d / time.Hour); {
+	case h < 1:
+		return "less than an hour"
+	case h < 48:
+		return itoa(h) + " " + plural(int(h), "hour", "hours")
+	default:
+		return itoa(h/24) + " days"
+	}
+}
+
+// lines are the lines that are not empty.
+func lines(ls ...string) []string {
+	var out []string
+	for _, l := range ls {
+		if l != "" {
+			out = append(out, l)
+		}
+	}
+	return out
+}
+
+// sortEvents puts the events of one run in the order of their ids, so the
+// history of the same run reads the same way every time.
+func sortEvents(es []history.Event) {
+	sort.SliceStable(es, func(i, j int) bool { return es[i].ID < es[j].ID })
+}
+
+func amount(m *check.Money) *history.Amount {
+	if m == nil {
+		return nil
+	}
+	return &history.Amount{Currency: m.Currency, Minor: m.Minor, Exponent: m.Exponent}
 }
 
 // news is the line about the violations a check found new and the ones it no
@@ -523,16 +730,17 @@ func cut(s string) string {
 const maxLines = 20
 
 // message is what a cycle posts: one line as it is, more under a first line
-// that counts them, sources first, so one event is one message. See
+// that counts the checks that changed and the sources, sources first, so one
+// event is one message. See
 // docs/adr/0007-source-down-one-message.md.
-func message(src sourceNews, checks []string) string {
+func message(src sourceNews, checks []string, changed int) string {
 	lines := append(append([]string(nil), src.lines...), checks...)
 	if len(lines) == 1 {
 		return "money-checks: " + lines[0]
 	}
 	var counts []string
-	if len(checks) > 0 {
-		counts = append(counts, itoa(int64(len(checks)))+" "+plural(len(checks), "check", "checks")+" changed")
+	if changed > 0 {
+		counts = append(counts, itoa(int64(changed))+" "+plural(changed, "check", "checks")+" changed")
 	}
 	if src.down > 0 {
 		counts = append(counts, itoa(int64(src.down))+" "+plural(src.down, "source", "sources")+" down")

@@ -297,6 +297,9 @@ type Serve struct {
 	// so a restart does not post them again. A relative path is relative to the
 	// configuration file.
 	StateFile string `yaml:"state_file"`
+	// HistoryFile, when set, gets a line of JSON for every change of a violation
+	// serve tracks. A relative path is relative to the configuration file.
+	HistoryFile string `yaml:"history_file"`
 	// Retry is how soon serve runs again the checks of a source that was down,
 	// doubled after each miss up to Interval.
 	Retry time.Duration `yaml:"retry"`
@@ -364,6 +367,9 @@ func parse(data []byte, dir string, known bool) (Config, error) {
 	}
 	c.Money = cur
 	errs = append(errs, c.readFiles(dir)...)
+	if c.Serve.HistoryFile != "" {
+		c.Serve.HistoryFile = Path(dir, c.Serve.HistoryFile)
+	}
 	if c.Serve.StateFile != "" {
 		c.Serve.StateFile = Path(dir, c.Serve.StateFile)
 	}
@@ -555,6 +561,9 @@ func (c *Config) check() []error {
 	}
 	if c.Serve.Interval < time.Minute {
 		errs = append(errs, fmt.Errorf("serve.interval: at least 1m, got %s", c.Serve.Interval))
+	}
+	if f := c.Serve.HistoryFile; f != "" && f == c.Serve.StateFile {
+		errs = append(errs, errors.New("serve.history_file: the same file as serve.state_file"))
 	}
 	if c.Serve.Retry < 10*time.Second || c.Serve.Retry > c.Serve.Interval {
 		errs = append(errs, fmt.Errorf("serve.retry: from 10s to serve.interval (%s), got %s", c.Serve.Interval, c.Serve.Retry))

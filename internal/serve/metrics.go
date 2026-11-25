@@ -21,6 +21,7 @@ type metrics struct {
 	errors      *prometheus.CounterVec
 	expect      *prometheus.GaugeVec
 	added       *prometheus.CounterVec
+	regressed   *prometheus.CounterVec
 	oldest      *prometheus.GaugeVec
 	interval    *prometheus.GaugeVec
 	sourceUp    *prometheus.GaugeVec
@@ -59,6 +60,9 @@ func newMetrics(reg prometheus.Registerer, cfg config.Config) *metrics {
 		added: prometheus.NewCounterVec(prometheus.CounterOpts{
 			Name: "money_check_new_violations_total", Help: "Violations the check found that it had not found before, or found with another amount; not counted on the first run.",
 		}, []string{"check"}),
+		regressed: prometheus.NewCounterVec(prometheus.CounterOpts{
+			Name: "money_check_regressed_violations_total", Help: "Violations the check found again within 90 days after a full run stopped finding them.",
+		}, []string{"check"}),
 		oldest: prometheus.NewGaugeVec(prometheus.GaugeOpts{
 			Name: "money_check_oldest_violation_age_seconds", Help: "How long ago serve first saw the oldest violation the check still finds; 0 without violations.",
 		}, []string{"check"}),
@@ -69,7 +73,7 @@ func newMetrics(reg prometheus.Registerer, cfg config.Config) *metrics {
 			Name: "money_check_source_up", Help: "1 if the source answered in the last run that used it, 0 if it could not be reached.",
 		}, []string{"source"}),
 	}
-	reg.MustRegister(m.runs, m.violations, m.known, m.amount, m.up, m.lastSuccess, m.duration, m.errors, m.expect, m.added, m.oldest, m.interval, m.sourceUp)
+	reg.MustRegister(m.runs, m.violations, m.known, m.amount, m.up, m.lastSuccess, m.duration, m.errors, m.expect, m.added, m.regressed, m.oldest, m.interval, m.sourceUp)
 	// For an alert on a check that stopped running, whatever its every.
 	for _, ch := range cfg.Checks {
 		every := ch.Every
@@ -110,10 +114,11 @@ func (m *metrics) update(res check.Result, now time.Time) {
 }
 
 // track exports what serve remembers of a check: how many violations were new
-// in this run and the age of the oldest. A check that serve cannot track, above
+// in this run, how many came back and the age of the oldest. A check that serve cannot track, above
 // maxTracked, has no age.
-func (m *metrics) track(name string, st *state, added int, now time.Time) {
+func (m *metrics) track(name string, st *state, added, regressed int, now time.Time) {
 	m.added.WithLabelValues(name).Add(float64(added))
+	m.regressed.WithLabelValues(name).Add(float64(regressed))
 	if !st.complete {
 		m.oldest.DeleteLabelValues(name)
 		return

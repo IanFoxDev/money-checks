@@ -10,10 +10,12 @@ import (
 	"time"
 
 	"github.com/ianfoxdev/money-checks/internal/check"
+	"github.com/ianfoxdev/money-checks/internal/history"
 )
 
-// stateVersion is the version of the state file; another version is not read.
-const stateVersion = 1
+// stateVersion is the version of the state file. Version 1, without versions of
+// checks and fixed violations, is read too; another version is not.
+const stateVersion = 2
 
 // stateFile is what serve.state_file holds: per check, what the last runs found.
 // See docs/adr/0006-serve-remembers-violations.md.
@@ -29,6 +31,15 @@ type checkState struct {
 	// Complete says that Violations holds every violation of the last full run.
 	Complete   bool                      `json:"complete,omitempty"`
 	Violations map[string]savedViolation `json:"violations,omitempty"`
+	// Version is the version of the check that made the last full run.
+	Version string                `json:"version,omitempty"`
+	Fixed   map[string]savedFixed `json:"fixed,omitempty"`
+}
+
+type savedFixed struct {
+	Amount    *savedAmount `json:"amount,omitempty"`
+	FirstSeen time.Time    `json:"first_seen"`
+	FixedAt   time.Time    `json:"fixed_at"`
 }
 
 type savedViolation struct {
@@ -56,7 +67,7 @@ func (s *Server) load() {
 	if err == nil {
 		err = json.Unmarshal(data, &f)
 	}
-	if err == nil && f.Version != stateVersion {
+	if err == nil && f.Version != stateVersion && f.Version != 1 {
 		err = fmt.Errorf("version %d, want %d", f.Version, stateVersion)
 	}
 	if err != nil {
@@ -78,11 +89,14 @@ func (s *Server) load() {
 		if cs.Complete {
 			st.seen = make(map[string]violation, len(cs.Violations))
 			for id, v := range cs.Violations {
-				w := violation{first: v.FirstSeen}
-				if a := v.Amount; a != nil {
-					w.amount = &check.Money{Currency: a.Currency, Minor: a.Minor, Exponent: a.Exponent}
+				st.seen[id] = violation{first: v.FirstSeen, amount: v.Amount.money()}
+			}
+			st.version = cs.Version
+			if len(cs.Fixed) > 0 {
+				st.fixed = make(map[string]fixedViolation, len(cs.Fixed))
+				for id, v := range cs.Fixed {
+					st.fixed[id] = fixedViolation{amount: v.Amount.money(), first: v.FirstSeen, at: v.FixedAt}
 				}
-				st.seen[id] = w
 			}
 		}
 		s.states[name] = st
@@ -104,11 +118,14 @@ func (s *Server) save() error {
 		if st.complete {
 			cs.Violations = make(map[string]savedViolation, len(st.seen))
 			for id, v := range st.seen {
-				sv := savedViolation{FirstSeen: v.first}
-				if a := v.amount; a != nil {
-					sv.Amount = &savedAmount{Currency: a.Currency, Minor: a.Minor, Exponent: a.Exponent}
+				cs.Violations[id] = savedViolation{FirstSeen: v.first, Amount: saved(v.amount)}
+			}
+			cs.Version = st.version
+			if len(st.fixed) > 0 {
+				cs.Fixed = make(map[string]savedFixed, len(st.fixed))
+				for id, v := range st.fixed {
+					cs.Fixed[id] = savedFixed{Amount: saved(v.amount), FirstSeen: v.first, FixedAt: v.at}
 				}
-				cs.Violations[id] = sv
 			}
 		}
 		f.Checks[name] = cs
@@ -133,4 +150,47 @@ func (s *Server) save() error {
 		err = os.Rename(tmp.Name(), path)
 	}
 	return err
+}
+
+func (a *savedAmount) money() *check.Money {
+	if a == nil {
+		return nil
+	}
+	return &check.Money{Currency: a.Currency, Minor: a.Minor, Exponent: a.Exponent}
+}
+
+func saved(m *check.Money) *savedAmount {
+	if m == nil {
+		return nil
+	}
+	return &savedAmount{Currency: m.Currency, Minor: m.Minor, Exponent: m.Exponent}
+}
+
+// startHistory makes sure the history file can be written. A file that does not
+// exist yet starts with a baseline of every violation serve already tracks, at
+// the time it first saw each, so the history knows what is open from its first
+// line. See docs/adr/0010-violation-history.md.
+func (s *Server) startHistory() error {
+	path := s.cfg.Serve.HistoryFile
+	_, err := os.Stat(path)
+	if err == nil {
+		return history.Append(path, nil)
+	}
+	if !errors.Is(err, fs.ErrNotExist) {
+		return err
+	}
+	var events []history.Event
+	for _, ch := range s.cfg.Checks {
+		st := s.states[ch.Name]
+		if st == nil || !st.complete {
+			continue
+		}
+		version := s.cfg.CheckVersion(ch)
+		start := len(events)
+		for id, v := range st.seen {
+			events = append(events, history.Event{Time: v.first, Check: ch.Name, ID: id, Event: history.Baseline, Scope: string(check.Full), Amount: amount(v.amount), Version: version})
+		}
+		sortEvents(events[start:])
+	}
+	return history.Append(path, events)
 }
