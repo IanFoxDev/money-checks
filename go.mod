@@ -3,7 +3,7 @@ module github.com/ianfoxdev/money-checks
 go 1.26.0
 
 require (
-	github.com/go-sql-driver/mysql v1.10.1
+	github.com/go-sql-driver/mysql v1.10.2
 	github.com/jackc/pgx/v5 v5.12.0
 	github.com/prometheus/client_golang v1.25.0
 	go.mongodb.org/mongo-driver/v2 v2.10.0
